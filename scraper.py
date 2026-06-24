@@ -1,10 +1,11 @@
 import requests
 from bs4 import BeautifulSoup
-import json
+import psycopg2
 import os
 
 
-
+def get_db_connection():
+    return psycopg2.connect(os.getenv("DATABASE_URL"))
 
 def is_relevant(title):
    return True
@@ -71,10 +72,10 @@ def get_all_jobs():
     all_jobs += scrape_greenhouse_html("Razorpay","razorpaysoftwareprivatelimited")
     all_jobs += scrape_greenhouse_html("PhonePe","phonepe")
     all_jobs += scrape_greenhouse_html("Groww","groww")
-           
+    all_jobs += scrape_greenhouse_html("Postman", "postman")      
  #lever companies
     all_jobs += scrape_lever("CRED","cred")
-
+    all_jobs += scrape_lever("Meesho","meesho")
     return all_jobs
         
 if __name__ == "__main__":
@@ -87,26 +88,35 @@ if __name__ == "__main__":
            print(f"Location:{job['location']}")
            print(f"Link:{job['url']}")
 
-SEEN_JOBS_FILE = "seen_jobs.json"
 
-def load_seen_json():
-   if os.path.exists(SEEN_JOBS_FILE) :
-      with open(SEEN_JOBS_FILE,"r") as f:
-         return set(json.load(f))
-   return set()
 
-def save_seen_jobs(seen):
-    with open(SEEN_JOBS_FILE,"w") as f:
-       json.dump(list(seen),f)
+def load_seen_jobs():
+   conn = get_db_connection()
+   cur = conn.cursor()
+   cur.execute("SELECT url FROM seen_jobs")
+   urls = set(row[0] for row in cur.fetchall())
+   cur.close()
+   conn.close()
+   return urls
+
+def save_seen_jobs(new_urls):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    for url in new_urls:
+        cur.execute("INSERT INTO seen_jobs (url) VALUES (%s) ON CONFLICT DO NOTHING", (url,))
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
 
 
 def get_new_jobs():        
-   seen = load_seen_json()
+   seen = load_seen_jobs()
    all_jobs = get_all_jobs()
 
    new_jobs = [job for job in all_jobs if job["url"]not in seen]
 
-   seen.update(job["url"] for job in new_jobs)
-   save_seen_jobs(seen)
+   save_seen_jobs(job["url"]for job in new_jobs)
 
    return new_jobs
