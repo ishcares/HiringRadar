@@ -6,8 +6,8 @@ import os
 
 def get_db_connection():
     url = os.getenv("DATABASE_URL")
-    print(f"DB URL starts with: {url[:50]}")
     return psycopg2.connect(url)
+
 def is_relevant(title):
    return True
 
