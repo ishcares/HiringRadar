@@ -5,8 +5,9 @@ import os
 
 
 def get_db_connection():
-    return psycopg2.connect(os.getenv("DATABASE_URL"))
-
+    url = os.getenv("DATABASE_URL")
+    print(f"DB URL starts with: {url[:50]}")
+    return psycopg2.connect(url)
 def is_relevant(title):
    return True
 
@@ -77,18 +78,6 @@ def get_all_jobs():
     all_jobs += scrape_lever("CRED","cred")
     all_jobs += scrape_lever("Meesho","meesho")
     return all_jobs
-        
-if __name__ == "__main__":
-    jobs = get_all_jobs()
-    if not jobs:
-      print("No relevant jobs found.")
-    else :
-      for job in jobs:
-           print(f"\n{job['company']}- {job['title']}")
-           print(f"Location:{job['location']}")
-           print(f"Link:{job['url']}")
-
-
 
 def load_seen_jobs():
    conn = get_db_connection()
@@ -120,3 +109,16 @@ def get_new_jobs():
    save_seen_jobs(job["url"]for job in new_jobs)
 
    return new_jobs
+
+        
+if __name__ == "__main__":
+    jobs = get_all_jobs()
+    if not jobs:
+      print("No relevant jobs found.")
+    else :
+      for job in jobs:
+           print(f"\n{job['company']}- {job['title']}")
+           print(f"Location:{job['location']}")
+           print(f"Link:{job['url']}")
+
+
