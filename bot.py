@@ -2,8 +2,10 @@ import os
 import asyncio
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-from scraper import get_new_jobs
+from scraper import get_new_jobs, get_all_jobs, save_subscriber, load_subscribers
 from dotenv import load_dotenv
+
+subscribers = load_subscribers()
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
@@ -14,6 +16,7 @@ subscribers = set()
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     subscribers.add(chat_id)
+    save_subscriber(chat_id) # save to database
     await update.message.reply_text("Welcome to HiringRadar! You'll get alerts when new jobs are posted at top Indian product companies 🚀")
    
    #send current open roles immediately

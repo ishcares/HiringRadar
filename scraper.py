@@ -127,3 +127,23 @@ if __name__ == "__main__":
            print(f"Location:{job['location']}")
            print(f"Link:{job['url']}")
 
+def save_subscriber(chat_id):
+   conn = get_db_connection()
+   cur = conn.cursor()
+   cur.execute("""
+               CREATE TABLE IF NOT EXIXTS subscribers(chat_id BIGINT PRIMARY KEY)"""
+               )
+   cur.execute("INSERT INTO subscribers(chat_id)VALUES (%s) ON CONFLICT DO NOTHING" , (chat_id))
+   conn.commit()
+   cur.close()
+   conn.close()
+   
+def load_subscribers():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("CREATE TABLE IF NOT EXISTS subscribers (chat_id BIGINT PRIMARY KEY)")
+    cur.execute("SELECT chat_id FROM subscribers")
+    ids = set(row[0] for row in cur.fetchall())
+    cur.close()
+    conn.close()
+    return ids
