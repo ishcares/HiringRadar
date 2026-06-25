@@ -137,7 +137,7 @@ def save_subscriber(chat_id):
    conn.commit()
    cur.close()
    conn.close()
-   
+
 def load_subscribers():
     conn = get_db_connection()
     cur = conn.cursor()
@@ -147,3 +147,12 @@ def load_subscribers():
     cur.close()
     conn.close()
     return ids
+
+def count_subscribers():
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM subscribers")
+    count = cur.fetchone()[0]
+    cur.close()
+    conn.close()
+    return count

@@ -2,16 +2,16 @@ import os
 import asyncio
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-from scraper import get_new_jobs, get_all_jobs, save_subscriber, load_subscribers
+from scraper import get_new_jobs, get_all_jobs, save_subscriber, load_subscribers,count_subscribers
 from dotenv import load_dotenv
 
-subscribers = load_subscribers()
+
 
 load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # store all user chat ids
-subscribers = set()
+subscribers = load_subscribers()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -20,7 +20,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Welcome to HiringRadar! You'll get alerts when new jobs are posted at top Indian product companies 🚀")
    
    #send current open roles immediately
-    from scraper import get_all_jobs
+    
     jobs = get_all_jobs()
     if jobs:
         await update.message.reply_text("here are the latesr open roles right now:")
@@ -37,8 +37,13 @@ async def send_alerts(context):
         for chat_id in subscribers:
             await context.bot.send_message(chat_id=chat_id, text=message)
 
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    count = count_subscribers()
+    await update.message.reply_text(f"HiringRadar has {count} subscribers 🎯")
+
 if __name__ == "__main__":
     app = ApplicationBuilder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.job_queue.run_repeating(send_alerts, interval=3600, first=10)
+    app.add_handler(CommandHandler("stats", stats))
     app.run_polling()
