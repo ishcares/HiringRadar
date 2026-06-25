@@ -9,7 +9,13 @@ def get_db_connection():
     return psycopg2.connect(url)
 
 def is_relevant(title):
-   return True
+    keywords = [
+        "engineer", "developer", "backend", "frontend", "fullstack",
+        "data", "ml", "ai", "product", "devops", "sde", "software",
+        "intern", "analyst"
+    ]
+    title_lower = title.lower()
+    return any(keyword in title_lower for keyword in keywords)
 
 def scrape_greenhouse_html(company_name, slug):
     url = f"https://job-boards.greenhouse.io/{slug}"
