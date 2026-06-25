@@ -132,6 +132,6 @@ def job():
 
 schedule.every(4).hours.do(job)
 
-while true:
+while True:
    schedule.run_pending()
    time.sleep(60)
