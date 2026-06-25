@@ -31,28 +31,24 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
    
     await update.message.reply_text("Checking current live roles for you, hold on...")
     
-    # Optimization: To avoid blocking the bot, grab the list but don't flood chat.
-    # Production note: In the future, read these from your DB instead of hitting live APIs here!
     jobs = get_all_jobs()
     if jobs:
-        # Show only the top 5 most recent openings to prevent spamming the user
-        recent_jobs = jobs[:5]
-        for job in recent_jobs:
-            keyboard = [[InlineKeyboardButton("⚡ Apply Directly", url=job['url'])]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            
-            message = (
-                f"🏢 **Company:** {job['company']}\n"
-                f"💼 **Role:** {job['title']}\n"
-                f"📍 **Location:** {job['location']}"
+        # Show top 5 as a single digest — same format as alerts, no flooding
+        preview = jobs[:5]
+        lines = []
+        for job in preview:
+            lines.append(
+                f"🏢 *{job['company']}*\n"
+                f"💼 {job['title']}\n"
+                f"📍 {job['location']}\n"
+                f"[→ Apply Now]({job['url']})"
             )
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=message,
-                parse_mode="Markdown",
-                reply_markup=reply_markup
-            )
-            await asyncio.sleep(0.1) # Small pause between individual messages
+        digest = f"*Here are 5 live roles right now:*\n━━━━━━━━━━━━━━━━━━━━━\n\n" + "\n\n".join(lines)
+        await update.message.reply_text(
+            digest,
+            parse_mode="Markdown",
+            disable_web_page_preview=True
+        )
     else:
         await update.message.reply_text("No open roles tracked right now. You're locked in for the next alert drop!")
 
