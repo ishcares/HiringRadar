@@ -24,8 +24,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for job in jobs:
             message = f"🆕 {job['company']} - {job['title']}\n📍 {job['location']}\n🔗 {job['url']}"
             await context.bot.send_message(chat_id=chat_id,text=message)
-        else:
-            await update.message.reply_text("No open roles right now. you'll be notified as soon as something new is posted!")
+    else:
+     await update.message.reply_text("No open roles right now. you'll be notified as soon as something new is posted!")
 
 async def send_alerts(context):
     jobs = get_new_jobs()
