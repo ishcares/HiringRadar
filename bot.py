@@ -63,19 +63,22 @@ async def send_alerts(context: ContextTypes.DEFAULT_TYPE):
     if not new_jobs:
         return
 
-    # --- Build a single digest message for ALL new jobs this cycle ---
+    # --- Build a clean digest for all new jobs this cycle ---
     count = len(new_jobs)
-    header = f"🚨 *{count} New Opening{'s' if count > 1 else ''} Detected!*\n\n"
-    
+    header = f"🔔 *HiringRadar — {count} New {'Opening' if count == 1 else 'Openings'}*\n"
+    header += "━━━━━━━━━━━━━━━━━━━━━\n"
+
     lines = []
-    for i, job in enumerate(new_jobs, 1):
+    for job in new_jobs:
         lines.append(
-            f"*{i}. {job['company']}* — {job['title']}\n"
-            f"   📍 {job['location']}\n"
-            f"   [⚡ Apply Now]({job['url']})"
+            f"🏢 *{job['company']}*\n"
+            f"💼 {job['title']}\n"
+            f"📍 {job['location']}\n"
+            f"[→ Apply Now]({job['url']})"
         )
-    
+
     digest = header + "\n\n".join(lines)
+    digest += "\n\n━━━━━━━━━━━━━━━━━━━━━\n_Beating LinkedIn since day 1_ 🚀"
 
     # --- Broadcast the single digest to every subscriber ---
     for chat_id in list(subscribers):

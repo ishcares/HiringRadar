@@ -8,10 +8,23 @@ def get_db_connection():
     return psycopg2.connect(url)
 
 def is_relevant(title):
+    # Precise tech/product keywords — avoids letting sales, ops, HR roles through.
+    # Deliberately avoids overbroad terms: 'data' catches 'data entry operator',
+    # 'entry' catches anything, 'associate' catches 'sales associate'.
     keywords = [
-        "engineer", "developer", "backend", "frontend", "fullstack",
-        "data", "ml", "ai", "product", "devops", "sde", "software",
-        "intern", "analyst"
+        # Engineering
+        "engineer", "developer", "sde", "software", "backend", "frontend",
+        "fullstack", "full-stack", "devops", "mobile", "android", "ios",
+        "infra", "infrastructure", "platform", "security", "cloud",
+        # Data & AI
+        "data scientist", "data engineer", "data analyst", "machine learning",
+        "ml engineer", "ai engineer", "deep learning", "nlp",
+        # Product & Design
+        "product manager", "product analyst", "product intern",
+        "ux", "ui designer", "design",
+        # Fresher/intern (tech-specific)
+        "intern", "internship", "trainee", "campus", "junior", "fresher",
+        "new grad", "graduate engineer",
     ]
     title_lower = title.lower()
     return any(keyword in title_lower for keyword in keywords)
@@ -93,10 +106,11 @@ def get_all_jobs():
         except Exception as e:
             print(f"Error scraping Greenhouse platform for {name}: {e}")
 
-    # Lever companies (Kept exactly as you cleanly implemented)
+    # Lever companies
     for name, slug in [
         ("CRED", "cred"),
         ("Meesho", "meesho"),
+        ("Freshworks", "freshworks"),  # Major Indian SaaS — hires freshers heavily
     ]:
         try:
             all_jobs += scrape_lever(name, slug)
