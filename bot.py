@@ -18,7 +18,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
    
    #send current open roles immediately
     from scraper import get_all_jobs
-    jobs = get_all_jobs
+    jobs = get_all_jobs()
     if jobs:
         await update.message.reply_text("here are the latesr open roles right now:")
         for job in jobs:
@@ -26,7 +26,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await context.bot.send_message(chat_id=chat_id,text=message)
         else:
             await update.message.reply_text("No open roles right now. you'll be notified as soon as something new is posted!")
-            
+
 async def send_alerts(context):
     jobs = get_new_jobs()
     for job in jobs:
