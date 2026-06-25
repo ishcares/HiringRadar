@@ -21,9 +21,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_subscriber(chat_id) 
         
     await update.message.reply_text(
-        "Welcome to HiringRadar! 🚀\n\n"
-        "You'll get real-time alerts the millisecond new jobs or internships "
-        "open up at top Indian product companies (Razorpay, CRED, Groww, PhonePe)."
+        "👋 Welcome to *HiringRadar*!\n\n"
+        "Whether you're a fresher hunting your first product role, or an experienced "
+        "engineer looking to switch — you'll get alerts the moment new openings drop "
+        "at top Indian product companies like Razorpay, CRED, Groww, Meesho, PhonePe, Rubrik and more.\n\n"
+        "⚡ We check every 5 minutes. LinkedIn finds out hours later.",
+        parse_mode="Markdown"
     )
    
     await update.message.reply_text("Checking current live roles for you, hold on...")

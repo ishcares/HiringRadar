@@ -8,21 +8,24 @@ def get_db_connection():
     return psycopg2.connect(url)
 
 def is_relevant(title):
-    # Precise tech/product keywords — avoids letting sales, ops, HR roles through.
+    # Covers the full spectrum — freshers to senior engineers.
     # Deliberately avoids overbroad terms: 'data' catches 'data entry operator',
     # 'entry' catches anything, 'associate' catches 'sales associate'.
     keywords = [
-        # Engineering
+        # Core engineering (catches Junior, Senior, Staff, Principal variants)
         "engineer", "developer", "sde", "software", "backend", "frontend",
         "fullstack", "full-stack", "devops", "mobile", "android", "ios",
         "infra", "infrastructure", "platform", "security", "cloud",
+        # Senior / leadership roles
+        "senior", "staff", "principal", "lead", "architect",
+        "engineering manager", "tech lead", "sde-2", "sde-3",
         # Data & AI
         "data scientist", "data engineer", "data analyst", "machine learning",
         "ml engineer", "ai engineer", "deep learning", "nlp",
         # Product & Design
         "product manager", "product analyst", "product intern",
         "ux", "ui designer", "design",
-        # Fresher/intern (tech-specific)
+        # Fresher / intern (tech-specific)
         "intern", "internship", "trainee", "campus", "junior", "fresher",
         "new grad", "graduate engineer",
     ]
@@ -100,6 +103,8 @@ def get_all_jobs():
         ("PhonePe", "phonepe"),
         ("Groww", "groww"),
         ("Postman", "postman"),
+        ("Coinbase", "coinbase"),   # Verified: has Remote-India + Hybrid-Bangalore roles
+        ("Rubrik", "rubrik"),       # Verified: active Bangalore intern + engineering roles
     ]:
         try:
             all_jobs += scrape_greenhouse_json(name, token)
