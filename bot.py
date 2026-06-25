@@ -12,6 +12,37 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 # Store all user chat ids locally for quick in-memory lookups
 subscribers = load_subscribers()
 
+def group_jobs(jobs):
+    """
+    Collapses duplicate title+company+location entries into one card
+    showing '(N openings)' — keeps the first URL as the apply link.
+    """
+    seen = {}
+    for job in jobs:
+        key = (job['company'], job['title'].strip(), job['location'])
+        if key not in seen:
+            seen[key] = {**job, 'count': 1}
+        else:
+            seen[key]['count'] += 1
+    return list(seen.values())
+
+def get_experience_tag(title):
+    """Infers experience level from job title for quick visual filtering."""
+    t = title.lower()
+    if any(k in t for k in ["intern", "internship", "trainee", "campus", "fresher", "new grad", "graduate engineer"]):
+        return "🌱 Fresher / Intern"
+    if any(k in t for k in ["director", "vp ", "vice president", "head of", "chief"]):
+        return "👑 Director / VP"
+    if any(k in t for k in ["engineering manager", "tech lead", "team lead", "group product"]):
+        return "🏆 Manager / Lead"
+    if any(k in t for k in ["principal", "staff", "architect", "sde-3", "sde iii", "sde3"]):
+        return "⚡ Staff / Principal"
+    if any(k in t for k in ["senior", "sr.", "sde-2", "sde ii", "sde2", "ii "]):
+        return "🚀 Senior (5+ yrs)"
+    if any(k in t for k in ["junior", "jr.", "sde-1", "sde i ", "sde1", "associate engineer"]):
+        return "🔵 Junior (0-2 yrs)"
+    return "💼 Mid-level (2-5 yrs)"
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     
@@ -33,17 +64,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     jobs = get_all_jobs()
     if jobs:
-        # Show top 5 as a single digest — same format as alerts, no flooding
-        preview = jobs[:5]
+        # Group duplicate title+company entries, then show top 5
+        grouped = group_jobs(jobs)
+        preview = grouped[:5]
         lines = []
         for job in preview:
+            count_label = f" _({job['count']} openings)_" if job['count'] > 1 else ""
             lines.append(
                 f"🏢 *{job['company']}*\n"
-                f"💼 {job['title']}\n"
+                f"💼 {job['title']}{count_label}\n"
+                f"🏷️ *Experience:* {get_experience_tag(job['title'])}\n"
                 f"📍 {job['location']}\n"
                 f"[→ Apply Now]({job['url']})"
             )
-        digest = f"*Here are 5 live roles right now:*\n━━━━━━━━━━━━━━━━━━━━━\n\n" + "\n\n".join(lines)
+        digest = f"*Here are {len(preview)} live roles right now:*\n━━━━━━━━━━━━━━━━━━━━━\n\n" + "\n\n".join(lines)
         await update.message.reply_text(
             digest,
             parse_mode="Markdown",
@@ -61,13 +95,16 @@ async def send_alerts(context: ContextTypes.DEFAULT_TYPE):
     if not new_jobs:
         return
 
-    # --- Build individual job lines ---
-    total = len(new_jobs)
+    # --- Group duplicates, then build individual job lines ---
+    grouped_jobs = group_jobs(new_jobs)
+    total = len(new_jobs)  # raw count for the header (e.g. "8 New Openings")
     job_lines = []
-    for job in new_jobs:
+    for job in grouped_jobs:
+        count_label = f" _({job['count']} openings)_" if job['count'] > 1 else ""
         job_lines.append(
             f"🏢 *{job['company']}*\n"
-            f"💼 {job['title']}\n"
+            f"💼 {job['title']}{count_label}\n"
+            f"🏷️ *Experience:* {get_experience_tag(job['title'])}\n"
             f"📍 {job['location']}\n"
             f"[→ Apply Now]({job['url']})"
         )
