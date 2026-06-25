@@ -59,41 +59,58 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def send_alerts(context: ContextTypes.DEFAULT_TYPE):
     """
     Periodic job loop. Scrapes for new openings and sends each subscriber
-    a single digest message — no matter how many jobs dropped this cycle.
-    One ping per cycle, not one ping per job.
+    digest message(s) — chunked to stay under Telegram's 4096-char limit.
     """
     new_jobs = get_new_jobs()
     if not new_jobs:
         return
 
-    # --- Build a clean digest for all new jobs this cycle ---
-    count = len(new_jobs)
-    header = f"🔔 *HiringRadar — {count} New {'Opening' if count == 1 else 'Openings'}*\n"
-    header += "━━━━━━━━━━━━━━━━━━━━━\n"
-
-    lines = []
+    # --- Build individual job lines ---
+    total = len(new_jobs)
+    job_lines = []
     for job in new_jobs:
-        lines.append(
+        job_lines.append(
             f"🏢 *{job['company']}*\n"
             f"💼 {job['title']}\n"
             f"📍 {job['location']}\n"
             f"[→ Apply Now]({job['url']})"
         )
 
-    digest = header + "\n\n".join(lines)
-    digest += "\n\n━━━━━━━━━━━━━━━━━━━━━\n_Beating LinkedIn since day 1_ 🚀"
+    # --- Pack lines into chunks under Telegram's 4096-char limit ---
+    TELEGRAM_LIMIT = 4000  # safe margin below 4096
+    chunks = []
+    current_chunk = []
+    current_len = 0
 
-    # --- Broadcast the single digest to every subscriber ---
+    for line in job_lines:
+        # +2 for the "\n\n" separator between entries
+        if current_len + len(line) + 2 > TELEGRAM_LIMIT and current_chunk:
+            chunks.append(current_chunk)
+            current_chunk = []
+            current_len = 0
+        current_chunk.append(line)
+        current_len += len(line) + 2
+
+    if current_chunk:
+        chunks.append(current_chunk)
+
+    # --- Broadcast each chunk to every subscriber ---
     for chat_id in list(subscribers):
         try:
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=digest,
-                parse_mode="Markdown",
-                disable_web_page_preview=True  # Keep it clean, no link previews
-            )
-            # Pacing delay to stay well under Telegram's 30 msg/s global limit
-            await asyncio.sleep(0.1)
+            for i, chunk in enumerate(chunks):
+                part_info = f" ({i+1}/{len(chunks)})" if len(chunks) > 1 else ""
+                header = f"🔔 *HiringRadar — {total} New {'Opening' if total == 1 else 'Openings'}{part_info}*\n"
+                header += "━━━━━━━━━━━━━━━━━━━━━\n"
+                digest = header + "\n\n".join(chunk)
+                digest += "\n\n━━━━━━━━━━━━━━━━━━━━━"
+
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=digest,
+                    parse_mode="Markdown",
+                    disable_web_page_preview=True
+                )
+                await asyncio.sleep(0.1)
 
         except Forbidden:
             subscribers.discard(chat_id)
