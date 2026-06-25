@@ -19,43 +19,50 @@ def is_relevant(title):
 
 def scrape_greenhouse_html(company_name, slug):
     url = f"https://job-boards.greenhouse.io/{slug}"
-    response = requests.get(url)
+    try:
+        response = requests.get(url, timeout=10)
+    except Exception as e:
+        print(f"Failed to fetch {company_name}: {e}")
+        return []
 
-    if response.status_code !=200:
-      print(f"Failed to fetch{company_name}: {response.status_code}")
-      return []
-    soup = BeautifulSoup(response.text,"html.parser")
-    job_rows = soup.find_all("tr",class_="job-post")
-   
-   
+    if response.status_code != 200:
+        print(f"Failed to fetch {company_name}: {response.status_code}")
+        return []
+    soup = BeautifulSoup(response.text, "html.parser")
+    job_rows = soup.find_all("tr", class_="job-post")
+
     relevant = []
 
     for row in job_rows:
-      title_tag = row.find("p", class_="body--medium")
-      location_tag = row.find("p", class_="body--metadata")
-      link_tag = row.find("a", href=True)
+        title_tag = row.find("p", class_="body--medium")
+        location_tag = row.find("p", class_="body--metadata")
+        link_tag = row.find("a", href=True)
 
-      if not title_tag:
-         continue
-      title = title_tag.get_text(strip=True)
-      location = location_tag.get_text(strip=True) if location_tag else "Not specified"
-      url = link_tag["href"] if link_tag else ""
+        if not title_tag:
+            continue
+        title = title_tag.get_text(strip=True)
+        location = location_tag.get_text(strip=True) if location_tag else "Not specified"
+        job_url = link_tag["href"] if link_tag else ""
 
-      if is_relevant(title):
-         relevant.append({
-               "company": company_name,
-               "title" : title,
-               "location": location,
-               "url": url
-        })
+        if is_relevant(title):
+            relevant.append({
+                "company": company_name,
+                "title": title,
+                "location": location,
+                "url": job_url
+            })
     return relevant
 
-def scrape_lever(company_name,company_slug):
+def scrape_lever(company_name, company_slug):
     url = f"https://api.lever.co/v0/postings/{company_slug}?mode=json"
-    response = requests.get(url)
+    try:
+        response = requests.get(url, timeout=10)
+    except Exception as e:
+        print(f"Failed to fetch {company_name}: {e}")
+        return []
 
     if response.status_code != 200:
-        print(f"Failed to fetch{company_name}: {response.status_code}")
+        print(f"Failed to fetch {company_name}: {response.status_code}")
         return []
     jobs = response.json()
     relevant = []
@@ -65,24 +72,37 @@ def scrape_lever(company_name,company_slug):
         if is_relevant(title):
             relevant.append({
                 "company": company_name,
-                 "title": title,
-                 "location": job["categories"].get("location","Not specified"),
-                 "url": job["hostedUrl"]
-
+                "title": title,
+                "location": job["categories"].get("location", "Not specified"),
+                "url": job["hostedUrl"]
             })
 
     return relevant
 def get_all_jobs():
     all_jobs = []
 
-  #greenhouse companies
-    all_jobs += scrape_greenhouse_html("Razorpay","razorpaysoftwareprivatelimited")
-    all_jobs += scrape_greenhouse_html("PhonePe","phonepe")
-    all_jobs += scrape_greenhouse_html("Groww","groww")
-    all_jobs += scrape_greenhouse_html("Postman", "postman")      
- #lever companies
-    all_jobs += scrape_lever("CRED","cred")
-    all_jobs += scrape_lever("Meesho","meesho")
+    # Greenhouse companies
+    for name, slug in [
+        ("Razorpay", "razorpaysoftwareprivatelimited"),
+        ("PhonePe", "phonepe"),
+        ("Groww", "groww"),
+        ("Postman", "postman"),
+    ]:
+        try:
+            all_jobs += scrape_greenhouse_html(name, slug)
+        except Exception as e:
+            print(f"Error scraping {name}: {e}")
+
+    # Lever companies
+    for name, slug in [
+        ("CRED", "cred"),
+        ("Meesho", "meesho"),
+    ]:
+        try:
+            all_jobs += scrape_lever(name, slug)
+        except Exception as e:
+            print(f"Error scraping {name}: {e}")
+
     return all_jobs
 
 def load_seen_jobs():
@@ -154,3 +174,11 @@ def count_subscribers():
     cur.close()
     conn.close()
     return count
+
+def remove_subscriber(chat_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM subscribers WHERE chat_id = %s", (chat_id,))
+    conn.commit()
+    cur.close()
+    conn.close()

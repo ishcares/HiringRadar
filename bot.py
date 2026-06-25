@@ -1,8 +1,9 @@
 import os
 import asyncio
 from telegram import Update
+from telegram.error import Forbidden
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
-from scraper import get_new_jobs, get_all_jobs, save_subscriber, load_subscribers,count_subscribers
+from scraper import get_new_jobs, get_all_jobs, save_subscriber, load_subscribers, count_subscribers, remove_subscriber
 from dotenv import load_dotenv
 
 
@@ -34,8 +35,15 @@ async def send_alerts(context):
     jobs = get_new_jobs()
     for job in jobs:
         message = f"🆕 {job['company']} - {job['title']}\n📍 {job['location']}\n🔗 {job['url']}"
-        for chat_id in subscribers:
-            await context.bot.send_message(chat_id=chat_id, text=message)
+        for chat_id in list(subscribers):
+            try:
+                await context.bot.send_message(chat_id=chat_id, text=message)
+            except Forbidden:
+                subscribers.discard(chat_id)
+                remove_subscriber(chat_id)
+                print(f"Removed blocked user {chat_id}")
+            except Exception as e:
+                print(f"Failed to send to {chat_id}: {e}")
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     count = count_subscribers()
