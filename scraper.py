@@ -21,7 +21,8 @@ def scrape_greenhouse_json(company_name, board_token):
     Upgraded from HTML to JSON API. Uses Greenhouse's official public endpoint.
     Completely immune to frontend layout shifts and structural design changes.
     """
-    url = f"https://greenhouse.io{board_token}/jobs"
+    url = f"https://boards-api.greenhouse.io/v1/boards/{board_token}/jobs"
+
     try:
         response = requests.get(url, timeout=10)
     except Exception as e:
