@@ -1,7 +1,7 @@
 import os
 import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.error import Forbidden, FloodPattern, RetryAfter
+from telegram.error import Forbidden,  RetryAfter
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from scraper import get_new_jobs, get_all_jobs, save_subscriber, load_subscribers, count_subscribers, remove_subscriber
 from dotenv import load_dotenv
