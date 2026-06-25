@@ -55,46 +55,48 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def send_alerts(context: ContextTypes.DEFAULT_TYPE):
     """
-    Periodic job loop. Scrapes targets and broadcasts new openings
-    safely while strictly observing Telegram flood restrictions.
+    Periodic job loop. Scrapes for new openings and sends each subscriber
+    a single digest message — no matter how many jobs dropped this cycle.
+    One ping per cycle, not one ping per job.
     """
     new_jobs = get_new_jobs()
     if not new_jobs:
         return
 
-    for job in new_jobs:
-        keyboard = [[InlineKeyboardButton("⚡ Apply Now", url=job['url'])]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        message = (
-            f"🚨 **New Opening Detected!**\n\n"
-            f"🏢 **Company:** {job['company']}\n"
-            f"💼 **Role:** {job['title']}\n"
-            f"📍 **Location:** {job['location']}"
+    # --- Build a single digest message for ALL new jobs this cycle ---
+    count = len(new_jobs)
+    header = f"🚨 *{count} New Opening{'s' if count > 1 else ''} Detected!*\n\n"
+    
+    lines = []
+    for i, job in enumerate(new_jobs, 1):
+        lines.append(
+            f"*{i}. {job['company']}* — {job['title']}\n"
+            f"   📍 {job['location']}\n"
+            f"   [⚡ Apply Now]({job['url']})"
         )
-        
-        for chat_id in list(subscribers):
-            try:
-                await context.bot.send_message(
-                    chat_id=chat_id, 
-                    text=message, 
-                    parse_mode="Markdown",
-                    reply_markup=reply_markup
-                )
-                # CRITICAL: Sleep for 50ms between users to strictly enforce 
-                # Telegram's maximum 30 messages/sec limit across channels.
-                await asyncio.sleep(0.05)
-                
-            except Forbidden:
-                subscribers.discard(chat_id)
-                remove_subscriber(chat_id)
-                print(f"Purged blocked user: {chat_id}")
-            except RetryAfter as e:
-                # Catch severe rate limits dynamically and wait it out
-                print(f"Rate limited. Sleeping for {e.retry_after} seconds")
-                await asyncio.sleep(e.retry_after)
-            except Exception as e:
-                print(f"Could not send alert to user {chat_id}: {e}")
+    
+    digest = header + "\n\n".join(lines)
+
+    # --- Broadcast the single digest to every subscriber ---
+    for chat_id in list(subscribers):
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=digest,
+                parse_mode="Markdown",
+                disable_web_page_preview=True  # Keep it clean, no link previews
+            )
+            # Pacing delay to stay well under Telegram's 30 msg/s global limit
+            await asyncio.sleep(0.1)
+
+        except Forbidden:
+            subscribers.discard(chat_id)
+            remove_subscriber(chat_id)
+        except RetryAfter as e:
+            print(f"Rate limited — backing off for {e.retry_after}s")
+            await asyncio.sleep(e.retry_after)
+        except Exception as e:
+            print(f"Failed to send digest to {chat_id}: {e}")
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     count = count_subscribers()
@@ -108,9 +110,8 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("stats", stats))
     
-    # Trigger job loop checker every 15 minutes (900s) instead of an hour (3600s)
-    # 1 hour is too long for Indian tech openings; they fill up way faster!
-    app.job_queue.run_repeating(send_alerts, interval=900, first=10)
+    # Poll every 5 minutes — beats LinkedIn's hours-long indexing delay
+    app.job_queue.run_repeating(send_alerts, interval=300, first=10)
     
     print("🚀 HiringRadar backend engine online and scanning...")
     app.run_polling()

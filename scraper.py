@@ -83,7 +83,7 @@ def get_all_jobs():
 
     # Upgraded: Greenhouse companies use clean board tokens now instead of complex HTML slugs
     for name, token in [
-        ("Razorpay", "razorpay"),
+        ("Razorpay", "razorpaysoftwareprivatelimited"),
         ("PhonePe", "phonepe"),
         ("Groww", "groww"),
         ("Postman", "postman"),
@@ -129,10 +129,15 @@ def get_new_jobs():
     seen = load_seen_jobs()
     all_jobs = get_all_jobs()
 
+    # 1. Filter out truly new jobs
     new_jobs = [job for job in all_jobs if job["url"] not in seen]
-    
+
     if new_jobs:
-        save_seen_jobs([job["url"] for job in new_jobs])
+        # 2. FIX: Extract explicit strings into a clean list
+        new_urls = [job["url"] for job in new_jobs]
+        
+        # 3. Save to DB IMMEDIATELY before returning to the bot
+        save_seen_jobs(new_urls)
 
     return new_jobs
         
