@@ -2,8 +2,6 @@ import requests
 from bs4 import BeautifulSoup
 import psycopg2
 import os
-import schedule
-import time
 
 
 def get_db_connection():
@@ -123,15 +121,3 @@ if __name__ == "__main__":
            print(f"Location:{job['location']}")
            print(f"Link:{job['url']}")
 
-#to schedule  and time for scraper
-
-def job():
-   jobs = get_new_jobs()
-   for j in jobs:
-      send_message(f"{j['title']}-{j['link']}")
-
-schedule.every(4).hours.do(job)
-
-while True:
-   schedule.run_pending()
-   time.sleep(60)

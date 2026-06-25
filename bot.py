@@ -1,7 +1,10 @@
 import requests
 from dotenv import load_dotenv
 import os
+import schedule
+import time
 from scraper import get_new_jobs
+
 
 # Load .env file from .venv directory
 load_dotenv()
@@ -45,3 +48,15 @@ if chat_id:
         for job in jobs:
             message = f"{job['company']}-{job['title']}\nLocation:{job['location']}\nLink:{job['url']}"
             send_message(chat_id,message)
+#to schedule  and time for scraper
+
+def job():
+   jobs = get_new_jobs()
+   for j in jobs:
+      send_message(f"{j['title']}-{j['link']}")
+
+schedule.every(4).hours.do(job)
+
+while True:
+   schedule.run_pending()
+   time.sleep(60)
