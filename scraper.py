@@ -105,6 +105,8 @@ def get_all_jobs():
         ("Postman", "postman"),
         ("Coinbase", "coinbase"),   # Verified: has Remote-India + Hybrid-Bangalore roles
         ("Rubrik", "rubrik"),       # Verified: active Bangalore intern + engineering roles
+        ("Tekion", "tekion"),       # Verified: active Chennai/Bangalore fresher + engineering roles
+        ("InMobi", "inmobi"),       # Verified: active India fresher + university roles
     ]:
         try:
             all_jobs += scrape_greenhouse_json(name, token)
