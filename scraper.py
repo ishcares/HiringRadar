@@ -127,7 +127,7 @@ def get_all_jobs():
         ("Upstox", "upstox"),              # ✅ stockbroking, hires interns
         ("Jupiter", "jupiter"),                    # ✅ new
         ("Hevo Data", "hevodata"),
-        ("Stable Money", "stable-money1")    # ✅ new
+        ("Stable Money", "stable-money1"),   # ✅ new
         ("Zeta", "zeta"),
         ("Sprinto", "Sprinto"),        # ✅ Indian SaaS security
         ("Mindtickle", "mindtickle"), # Major Indian SaaS — hires freshers heavily

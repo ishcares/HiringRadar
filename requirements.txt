@@ -9,3 +9,6 @@ soupsieve==2.8.4
 typing_extensions==4.15.0
 urllib3==2.7.0
 python-telegram-bot[job-queue]==21.11.1
+supabase
+sentence-transformers
+scikit-learn
