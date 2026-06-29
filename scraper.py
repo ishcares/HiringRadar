@@ -27,7 +27,9 @@ def is_relevant(title):
         "ux", "ui designer", "design",
         # Fresher / intern (tech-specific)
         "intern", "internship", "trainee", "campus", "junior", "fresher",
-        "new grad", "graduate engineer",
+        "new grad", "graduate engineer","research engineer", "research intern", "applied scientist",
+        "computer vision", "generative ai", "llm", "prompt engineer",
+        "data science intern", "ml intern", "ai intern",
     ]
     title_lower = title.lower()
     return any(keyword in title_lower for keyword in keywords)
@@ -106,7 +108,9 @@ def get_all_jobs():
         ("Coinbase", "coinbase"),   # Verified: has Remote-India + Hybrid-Bangalore roles
         ("Rubrik", "rubrik"),       # Verified: active Bangalore intern + engineering roles
         ("Tekion", "tekion"),       # Verified: active Chennai/Bangalore fresher + engineering roles
-        ("InMobi", "inmobi"),       # Verified: active India fresher + university roles
+        ("InMobi", "inmobi"), 
+        
+          # Verified: active India fresher + university roles
     ]:
         try:
             all_jobs += scrape_greenhouse_json(name, token)
@@ -117,7 +121,16 @@ def get_all_jobs():
     for name, slug in [
         ("CRED", "cred"),
         ("Meesho", "meesho"),
-        ("Freshworks", "freshworks"),  # Major Indian SaaS — hires freshers heavily
+        ("Freshworks", "freshworks"),
+        ("Atlassian", "atlassian"),
+        ("Paytm", "paytm"), 
+        ("Upstox", "upstox"),              # ✅ stockbroking, hires interns
+        ("Jupiter", "jupiter"),                    # ✅ new
+        ("Hevo Data", "hevodata"),
+        ("Stable Money", "stable-money1")    # ✅ new
+        ("Zeta", "zeta"),
+        ("Sprinto", "Sprinto"),        # ✅ Indian SaaS security
+        ("Mindtickle", "mindtickle"), # Major Indian SaaS — hires freshers heavily
     ]:
         try:
             all_jobs += scrape_lever(name, slug)
