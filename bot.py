@@ -99,7 +99,7 @@ def filter_by_job_type(jobs: list, job_type: str) -> list:
         return jobs
     return [j for j in jobs if (job_type == "internship") == is_internship(j)]
 
-def match_jobs_for_student(student: dict, jobs: list, top_n=10, threshold=0.35):
+def match_jobs_for_student(student: dict, jobs: list, top_n=10, threshold=0.45):
     jobs = filter_by_job_type(jobs, student.get("job_type", "both"))
     roles = student.get("preferred_roles") or []
     jobs = [j for j in jobs if matches_role(j["title"], roles)]
@@ -107,6 +107,15 @@ def match_jobs_for_student(student: dict, jobs: list, top_n=10, threshold=0.35):
     if not jobs:
         return []
 
+    # ✅ Add this — boost fresher jobs for students graduating 2025-2027
+    grad_year = student.get("graduation_year", 2026)
+    if grad_year >= 2025:
+        fresher_jobs = [j for j in jobs if any(k in j["title"].lower() for k in
+            ["intern", "internship", "fresher", "junior", "graduate", "new grad", "sde-1", "sde1", "associate"])]
+        if fresher_jobs:
+            jobs = fresher_jobs
+
+    # rest stays same...
     skills = ", ".join(student.get("skills") or [])
     role_str = ", ".join(roles)
     profile_text = f"{role_str} developer. Skills: {skills}."

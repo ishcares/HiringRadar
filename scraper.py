@@ -108,7 +108,9 @@ def get_all_jobs():
         ("Coinbase", "coinbase"),   # Verified: has Remote-India + Hybrid-Bangalore roles
         ("Rubrik", "rubrik"),       # Verified: active Bangalore intern + engineering roles
         ("Tekion", "tekion"),       # Verified: active Chennai/Bangalore fresher + engineering roles
-        ("InMobi", "inmobi"), 
+        ("InMobi", "inmobi"),
+        ("Deepmind", "deepmind"),
+        ("Glean", "glean"),   
         
           # Verified: active India fresher + university roles
     ]:
