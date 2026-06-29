@@ -109,10 +109,13 @@ def get_all_jobs():
         ("Rubrik", "rubrik"),       # Verified: active Bangalore intern + engineering roles
         ("Tekion", "tekion"),       # Verified: active Chennai/Bangalore fresher + engineering roles
         ("InMobi", "inmobi"),
-        ("Deepmind", "deepmind"),
-        ("Glean", "glean"),   
-        
-          # Verified: active India fresher + university roles
+        # ML / AI
+        ("DeepMind", "deepmind"),        # ✅ verified
+        ("Glean", "gleanwork"),          # ✅ verified (token is gleanwork)
+        ("Scale AI", "scaleai"),         # ✅ verified
+        # Finance
+        ("Stripe", "stripe"),            # ✅ verified
+        ("Brex", "brex"),               # ✅ verified
     ]:
         try:
             all_jobs += scrape_greenhouse_json(name, token)
@@ -125,13 +128,15 @@ def get_all_jobs():
         ("Meesho", "meesho"),
         ("Freshworks", "freshworks"),
         ("Atlassian", "atlassian"),
-        ("Paytm", "paytm"), 
-                            # ✅ new
+        ("Paytm", "paytm"),
         ("Hevo Data", "hevodata"),
-        ("Stable Money", "stable-money1"),   # ✅ new
+        ("Stable Money", "stable-money1"),
         ("Zeta", "zeta"),
-        ("Sprinto", "Sprinto"),        # ✅ Indian SaaS security
+        ("Sprinto", "Sprinto"),        # Indian SaaS security
         ("Mindtickle", "mindtickle"), # Major Indian SaaS — hires freshers heavily
+        # Finance
+        ("fi.money", "epifi"),         # ✅ verified
+        ("Plaid", "plaid"),            # ✅ verified (Lever, not Greenhouse)
     ]:
         try:
             all_jobs += scrape_lever(name, slug)
