@@ -350,7 +350,14 @@ if __name__ == "__main__":
             ROLES:     [MessageHandler(filters.TEXT & ~filters.COMMAND, get_roles)],
             JOB_TYPE:  [MessageHandler(filters.TEXT & ~filters.COMMAND, get_job_type)],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+    fallbacks=[
+        CommandHandler("cancel", cancel),
+        CommandHandler("start", start),
+        CommandHandler("stats", stats),
+        CommandHandler("profile", profile),
+        CommandHandler("jobs", jobs),
+        ],
+        allow_reentry=True,
     )
 
     app.add_handler(conv_handler)
