@@ -99,7 +99,7 @@ def filter_by_job_type(jobs: list, job_type: str) -> list:
         return jobs
     return [j for j in jobs if (job_type == "internship") == is_internship(j)]
 
-def match_jobs_for_student(student: dict, jobs: list, top_n=10, threshold=0.45):
+def match_jobs_for_student(student: dict, jobs: list, top_n=10, threshold=0.25):
     jobs = filter_by_job_type(jobs, student.get("job_type", "both"))
     roles = student.get("preferred_roles") or []
     jobs = [j for j in jobs if matches_role(j["title"], roles)]
@@ -107,7 +107,7 @@ def match_jobs_for_student(student: dict, jobs: list, top_n=10, threshold=0.45):
     if not jobs:
         return []
 
-    # ✅ Add this — boost fresher jobs for students graduating 2025-2027
+    # Boost fresher/intern roles for students graduating 2025-2027
     grad_year = student.get("graduation_year", 2026)
     if grad_year >= 2025:
         fresher_jobs = [j for j in jobs if any(k in j["title"].lower() for k in
@@ -115,13 +115,18 @@ def match_jobs_for_student(student: dict, jobs: list, top_n=10, threshold=0.45):
         if fresher_jobs:
             jobs = fresher_jobs
 
-    # rest stays same...
     skills = ", ".join(student.get("skills") or [])
     role_str = ", ".join(roles)
-    profile_text = f"{role_str} developer. Skills: {skills}."
+    profile_text = f"{role_str} developer with skills in {skills}."
+
+    # Enrich job text with company + location
+    job_texts = [
+        f"{j['title']} at {j['company']} in {j.get('location', '')}".strip()
+        for j in jobs
+    ]
 
     profile_emb = model.encode([profile_text])
-    job_embs = model.encode([f"{j['title']} {j.get('description', '')}" for j in jobs])
+    job_embs = model.encode(job_texts)
     scores = cosine_similarity(profile_emb, job_embs)[0]
 
     ranked = sorted(zip(jobs, scores), key=lambda x: x[1], reverse=True)
