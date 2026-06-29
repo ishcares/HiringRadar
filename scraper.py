@@ -16,22 +16,35 @@ def is_relevant(title):
         "engineer", "developer", "sde", "software", "backend", "frontend",
         "fullstack", "full-stack", "devops", "mobile", "android", "ios",
         "infra", "infrastructure", "platform", "security", "cloud",
-        # Senior / leadership roles
-        "senior", "staff", "principal", "lead", "architect",
+        # Senior / leadership roles (engineering-specific)
         "engineering manager", "tech lead", "sde-2", "sde-3",
+        "staff engineer", "principal engineer", "senior engineer",
+        "senior developer", "senior software", "lead engineer",
+        "senior data", "senior ml", "senior ai",
         # Data & AI
         "data scientist", "data engineer", "data analyst", "machine learning",
         "ml engineer", "ai engineer", "deep learning", "nlp",
-        # Product & Design
+        # Product & Design (tech-focused)
         "product manager", "product analyst", "product intern",
-        "ux", "ui designer", "design",
+        "ux", "ui designer",
         # Fresher / intern (tech-specific)
         "intern", "internship", "trainee", "campus", "junior", "fresher",
-        "new grad", "graduate engineer","research engineer", "research intern", "applied scientist",
-        "computer vision", "generative ai", "llm", "prompt engineer",
-        "data science intern", "ml intern", "ai intern",
+        "new grad", "graduate engineer", "research engineer", "research intern",
+        "applied scientist", "computer vision", "generative ai", "llm",
+        "prompt engineer", "data science intern", "ml intern", "ai intern",
+    ]
+    # Blocklist: non-engineering roles that slip through on broad keywords
+    blocklist = [
+        "customer success", "customer support", "sales", "marketing",
+        "business development", "account manager", "account executive",
+        "human resources", "hr ", "recruiter", "talent", "legal",
+        "finance", "accounting", "operations manager", "program manager",
+        "content", "copywriter", "brand", "growth manager",
+        "associate, ", "associate -",  # catches 'Senior Associate, Finance'
     ]
     title_lower = title.lower()
+    if any(bad in title_lower for bad in blocklist):
+        return False
     return any(keyword in title_lower for keyword in keywords)
 
 def scrape_greenhouse_json(company_name, board_token):

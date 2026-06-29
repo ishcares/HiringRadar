@@ -271,10 +271,27 @@ async def jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if res.data:
         matched = match_jobs_for_student(res.data[0], grouped)
-        display_jobs = [job for job, score in matched] if matched else grouped[:5]
-        label = "matched" if matched else "latest"
+        if matched:
+            display_jobs = [job for job, score in matched]
+            label = "matched"
+        else:
+            # Fallback: sample one job per company for variety
+            import random
+            sampled = {}
+            for job in grouped:
+                sampled.setdefault(job['company'], job)
+            pool = list(sampled.values())
+            random.shuffle(pool)
+            display_jobs = pool[:5]
+            label = "latest"
     else:
-        display_jobs = grouped[:5]
+        import random
+        sampled = {}
+        for job in grouped:
+            sampled.setdefault(job['company'], job)
+        pool = list(sampled.values())
+        random.shuffle(pool)
+        display_jobs = pool[:5]
         label = "latest"
 
     if not display_jobs:
