@@ -124,8 +124,7 @@ def get_all_jobs():
         ("Freshworks", "freshworks"),
         ("Atlassian", "atlassian"),
         ("Paytm", "paytm"), 
-        ("Upstox", "upstox"),              # ✅ stockbroking, hires interns
-        ("Jupiter", "jupiter"),                    # ✅ new
+                            # ✅ new
         ("Hevo Data", "hevodata"),
         ("Stable Money", "stable-money1"),   # ✅ new
         ("Zeta", "zeta"),
