@@ -131,9 +131,8 @@ def get_all_jobs():
         ("InMobi", "inmobi"),
         ("DeepMind", "deepmind"),
         ("Glean", "gleanwork"),
-        ("Scale AI", "scaleai"),
-        ("Stripe", "stripe"),
-        ("Brex", "brex"),
+       
+        
     ]:
         try:
             all_jobs += scrape_greenhouse_json(name, token)
@@ -143,8 +142,7 @@ def get_all_jobs():
     for name, slug in [
         ("CRED", "cred"),
         ("Meesho", "meesho"),
-        ("Freshworks", "freshworks"),
-        ("Atlassian", "atlassian"),
+        
         ("Paytm", "paytm"),
         ("Hevo Data", "hevodata"),
         ("Stable Money", "stable-money1"),
@@ -152,7 +150,9 @@ def get_all_jobs():
         ("Sprinto", "sprinto"),
         ("Mindtickle", "mindtickle"),
         ("fi.money", "epifi"),
-        ("Plaid", "plaid"),
+        ("FamPay", "fampay"),          # ✅ fintech for students, hires interns
+        ("JumpCloud", "jumpcloud"),
+        
     ]:
         try:
             all_jobs += scrape_lever(name, slug)
