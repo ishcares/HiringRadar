@@ -220,15 +220,20 @@ async def get_job_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = context.user_data
     chat_id = update.effective_chat.id
 
-    supabase.table("students").upsert({
-        "chat_id": chat_id,
-        "name": data['name'],
-        "branch": data['branch'],
-        "graduation_year": data['graduation_year'],
-        "skills": data['skills'],
-        "preferred_roles": data['preferred_roles'],
-        "job_type": data['job_type'],
-    }).execute()
+    try:
+        supabase.table("students").upsert({
+            "chat_id": chat_id,
+            "name": data['name'],
+            "branch": data['branch'],
+            "graduation_year": data['graduation_year'],
+            "skills": data['skills'],
+            "preferred_roles": data['preferred_roles'],
+            "job_type": data['job_type'],
+        }).execute()
+    except Exception as e:
+        print(f"Supabase upsert failed: {e}")
+        await update.message.reply_text("⚠️ Couldn't save profile right now. Try /start again.")
+        return ConversationHandler.END
 
     await update.message.reply_text(
         f"✅ Profile saved, *{data['name']}*!\n\n"
@@ -240,7 +245,6 @@ async def get_job_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
     return ConversationHandler.END
-
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Setup cancelled. Type /start to begin again.")
     return ConversationHandler.END
