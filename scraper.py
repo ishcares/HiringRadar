@@ -17,7 +17,7 @@ def is_india_location(location: str) -> bool:
     blocklist = [
         "malaysia", "singapore", "us", "usa", "united states",
         "london", "uk", "europe", "australia", "canada",
-        "new york", "san francisco", "seattle"
+        "new york", "san francisco", "seattle","turkiye","san francisco" "canada"
     ]
     location_lower = location.lower()
     if any(b in location_lower for b in blocklist):
