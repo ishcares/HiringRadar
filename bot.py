@@ -268,9 +268,10 @@ async def jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     res = supabase.table("students").select("*").eq("chat_id", chat_id).execute()
 
-    all_jobs = get_all_jobs()
-    grouped = group_jobs(all_jobs)
+    await update.message.reply_text("🔍 Checking latest roles for you, hold on...")
 
+    all_jobs = await asyncio.to_thread(get_all_jobs)
+    grouped = group_jobs(all_jobs)
     # Get grad year for tagging
     grad_year = res.data[0].get("graduation_year", 2026) if res.data else 2026
 
@@ -318,10 +319,9 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ── Alert scheduler ────────────────────────────────────────────────────────
 
 async def send_alerts(context: ContextTypes.DEFAULT_TYPE):
-    new_jobs = get_new_jobs()
+    new_jobs = await asyncio.to_thread(get_new_jobs)
     if not new_jobs:
         return
-
     grouped_jobs = group_jobs(new_jobs)
     students = supabase.table("students").select("*").execute().data
 

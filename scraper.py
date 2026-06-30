@@ -55,7 +55,7 @@ def scrape_greenhouse_json(company_name, board_token):
     url = f"https://boards-api.greenhouse.io/v1/boards/{board_token}/jobs"
 
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=5)
     except Exception as e:
         print(f"Failed to fetch {company_name}: {e}")
         return []
@@ -86,7 +86,7 @@ def scrape_greenhouse_json(company_name, board_token):
 def scrape_lever(company_name, company_slug):
     url = f"https://api.lever.co/v0/postings/{company_slug}?mode=json"
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=5)
     except Exception as e:
         print(f"Failed to fetch {company_name}: {e}")
         return []
