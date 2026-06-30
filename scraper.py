@@ -147,7 +147,7 @@ def get_all_jobs():
         ("Hevo Data", "hevodata"),
         ("Stable Money", "stable-money1"),
         ("Zeta", "zeta"),
-       ("Sprinto", "sprinto"),
+        ("Sprinto", "Sprinto"),
         ("Mindtickle", "mindtickle"),
         ("fi.money", "epifi"),
         ("FamPay", "fampay"),          # ✅ fintech for students, hires interns
