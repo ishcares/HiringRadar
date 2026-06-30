@@ -14,6 +14,14 @@ def is_india_location(location: str) -> bool:
         "hyderabad", "pune", "chennai", "noida", "gurgaon",
         "gurugram", "kolkata", "remote"
     ]
+    blocklist = [
+        "malaysia", "singapore", "us", "usa", "united states",
+        "london", "uk", "europe", "australia", "canada",
+        "new york", "san francisco", "seattle"
+    ]
+    location_lower = location.lower()
+    if any(b in location_lower for b in blocklist):
+        return False
     return any(k in location.lower() for k in india_keywords)
 
 def is_relevant(title):

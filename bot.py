@@ -405,33 +405,3 @@ if __name__ == "__main__":
     print("🚀 HiringRadar backend engine online and scanning...")
     app.run_polling()
 
-async def broadcast_profile_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """One-time command — run once then remove"""
-    # Safety check — only you can run this
-    ADMIN_CHAT_ID = update.effective_chat.id  # first run will show your ID in logs
-    
-    subscribers = load_subscribers()
-    sent = 0
-    
-    for chat_id in subscribers:
-        try:
-            await context.bot.send_message(
-                chat_id=chat_id,
-                text=(
-                    "👋 *HiringRadar just got smarter!*\n\n"
-                    "We've added personalized job matching — "
-                    "you'll now only get alerts for roles that match your profile.\n\n"
-                    "Takes 2 minutes to set up 👇\n\n"
-                    "Type /start to create your profile and get matched jobs!"
-                ),
-                parse_mode="Markdown"
-            )
-            sent += 1
-            await asyncio.sleep(0.1)
-        except Exception as e:
-            print(f"Failed to message {chat_id}: {e}")
-    
-    await update.message.reply_text(f"✅ Sent to {sent} subscribers.")
-
-# Add to main:
-app.add_handler(CommandHandler("broadcast", broadcast_profile_setup))
