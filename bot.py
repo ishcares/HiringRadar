@@ -370,9 +370,9 @@ async def send_alerts(context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print(f"Failed to send to {student['chat_id']}: {e}")
 
-app.add_handler(CommandHandler("broadcast", broadcast_profile_setup))
 
-ADMIN_CHAT_ID = 7401731570  # replace with your real Telegram chat id
+
+ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID"))
 
 async def broadcast_profile_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != ADMIN_CHAT_ID:
@@ -428,7 +428,9 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("profile", profile))
     app.add_handler(CommandHandler("jobs", jobs))
     app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(CommandHandler("broadcast", broadcast_profile_setup))
     app.job_queue.run_repeating(send_alerts, interval=300, first=10)
+    
 
     print("🚀 HiringRadar backend engine online and scanning...")
     app.run_polling()
