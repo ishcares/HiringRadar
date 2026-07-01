@@ -370,6 +370,35 @@ async def send_alerts(context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print(f"Failed to send to {student['chat_id']}: {e}")
 
+app.add_handler(CommandHandler("broadcast", broadcast_profile_setup))
+
+ADMIN_CHAT_ID = 7401731570  # replace with your real Telegram chat id
+
+async def broadcast_profile_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.id != ADMIN_CHAT_ID:
+        return
+
+    students = supabase.table("students").select("chat_id").execute().data
+    sent = 0
+    for s in students:
+        try:
+            await context.bot.send_message(
+                chat_id=s['chat_id'],
+                text=(
+                    "👋 *Quick update from HiringRadar!*\n\n"
+                    "We're tweaking how job matching works behind the scenes "
+                    "to get you more relevant roles — you might notice slightly "
+                    "different results over the next few days while we tune it.\n\n"
+                    "No action needed on your end 🙌"
+                ),
+                parse_mode="Markdown"
+            )
+            sent += 1
+            await asyncio.sleep(0.1)
+        except Exception as e:
+            print(f"Failed to message {s['chat_id']}: {e}")
+    await update.message.reply_text(f"✅ Sent to {sent} students.")
+
 # ── Main ───────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -404,31 +433,5 @@ if __name__ == "__main__":
     print("🚀 HiringRadar backend engine online and scanning...")
     app.run_polling()
 
-    app.add_handler(CommandHandler("broadcast", broadcast_profile_setup))
+    
 
-ADMIN_CHAT_ID = 7401731570  # replace with your real Telegram chat id
-
-async def broadcast_profile_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != ADMIN_CHAT_ID:
-        return
-
-    students = supabase.table("students").select("chat_id").execute().data
-    sent = 0
-    for s in students:
-        try:
-            await context.bot.send_message(
-                chat_id=s['chat_id'],
-                text=(
-                    "👋 *Quick update from HiringRadar!*\n\n"
-                    "We're tweaking how job matching works behind the scenes "
-                    "to get you more relevant roles — you might notice slightly "
-                    "different results over the next few days while we tune it.\n\n"
-                    "No action needed on your end 🙌"
-                ),
-                parse_mode="Markdown"
-            )
-            sent += 1
-            await asyncio.sleep(0.1)
-        except Exception as e:
-            print(f"Failed to message {s['chat_id']}: {e}")
-    await update.message.reply_text(f"✅ Sent to {sent} students.")
