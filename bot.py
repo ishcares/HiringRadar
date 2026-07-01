@@ -1,14 +1,15 @@
 import os
 import asyncio
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import Forbidden, RetryAfter
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, 
-    MessageHandler, ContextTypes, 
-    ConversationHandler, filters
+    ApplicationBuilder, CommandHandler,
+    MessageHandler, ContextTypes,
+    ConversationHandler, CallbackQueryHandler, filters
 )
+import hashlib
 from scraper import get_new_jobs, get_all_jobs, count_subscribers
-from database import datetime
+from datetime import datetime
 from supabase import create_client
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -112,8 +113,8 @@ def match_jobs_for_student(student: dict, jobs: list, top_n=10, threshold=0.25):
     current_year = datetime.now().year
     grad_year = student.get("graduation_year", current_year)
     if grad_year >= current_year-1:
-        fresher_keywords = ["intern","internship","fresher","junior","graduate","new grad","sde-1,"sde1", "associate"]
-        senior_tag ={"👑 Director / VP", "🏆 Manager / Lead", "⚡ Staff / Principal", "🚀 Senior (5+ yrs)"}
+        fresher_keywords = ["intern","internship","fresher","junior","graduate","new grad","sde-1","sde1", "associate"]
+        senior_tags ={"👑 Director / VP", "🏆 Manager / Lead", "⚡ Staff / Principal", "🚀 Senior (5+ yrs)"}
         jobs = [
              j for j in jobs
              if any(k in j["title"].lower()for k in fresher_keywords)
@@ -139,15 +140,42 @@ def match_jobs_for_student(student: dict, jobs: list, top_n=10, threshold=0.25):
     ranked = sorted(zip(jobs, scores), key=lambda x: x[1], reverse=True)
     return [(job, score) for job, score in ranked if score >= threshold][:top_n]
 
-def format_job_card(job: dict, grad_year: int = 2026) -> str:
+def build_match_reason(job: dict, student: dict) -> str:
+    """Build a short human-readable explanation of why a job matched."""
+    reasons = []
+    title_lower = job["title"].lower()
+    skills = student.get("skills") or []
+    matched_skills = [s for s in skills if s.lower() in title_lower]
+    if matched_skills:
+        reasons.append(f"Matches your {', '.join(matched_skills[:2])} skills")
+    roles = student.get("preferred_roles") or []
+    for role in roles:
+        keywords = keyword_map.get(role, [])
+        if any(k in title_lower for k in keywords):
+            reasons.append(f"{role.capitalize()} role")
+            break
+    exp_tag = get_experience_tag(job["title"])
+    grad_year = student.get("graduation_year", datetime.now().year)
+    fit = get_graduation_tag(job["title"], grad_year)
+    if "Good" in fit:
+        reasons.append("Fresher-friendly")
+    if not reasons:
+        reasons.append("Matches your profile")
+    return " · ".join(reasons)
+
+def format_job_card(job: dict, grad_year: int = 2026, score: float = 0.0, student: dict = None) -> str:
     """Single place to format a job card — used everywhere"""
     count_label = f" _({job['count']} openings)_" if job.get('count', 1) > 1 else ""
+    score_line = f"🎯 Match: {round(score * 100)}%\n" if score > 0 else ""
+    reason_line = f"💡 _{build_match_reason(job, student)}_\n" if student and score > 0 else ""
     return (
         f"🏢 *{job['company']}*\n"
         f"💼 {job['title']}{count_label}\n"
         f"🏷️ {get_experience_tag(job['title'])}\n"
         f"🎓 {get_graduation_tag(job['title'], grad_year)}\n"
         f"📍 {job['location']}\n"
+        f"{score_line}"
+        f"{reason_line}"
         f"[→ Apply Now]({job['url']})"
     )
 
@@ -198,7 +226,7 @@ async def get_grad_year(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{current_year - 10} and {current_year + 6}."
         )
         return GRAD_YEAR
-    context.use_data['graduation_year'] = year
+    context.user_data['graduation_year'] = year
     
     await update.message.reply_text(
         "💻 What are your top skills?\n\nSend comma separated: *Python, React, SQL, ML*",
@@ -275,13 +303,21 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No profile found. Type /start to set one up.")
         return
     s = res.data[0]
+    paused_status = "⏸️ Paused" if s.get("paused") else "🟢 Active"
     await update.message.reply_text(
         f"👤 *Your Profile*\n\n"
         f"🙋 Name: {s['name']}\n"
         f"🎓 Branch: {s['branch']} | {s['graduation_year']}\n"
         f"💻 Skills: {', '.join(s['skills'] or [])}\n"
         f"🎯 Roles: {', '.join(s['preferred_roles'] or [])}\n"
-        f"💼 Job type: {s['job_type']}",
+        f"💼 Job type: {s['job_type']}\n"
+        f"🔔 Alerts: {paused_status}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"✏️ *Update your profile:*\n"
+        f"`/skills` Python, ML, SQL\n"
+        f"`/roles` backend, ml\n"
+        f"`/experience` internship\n"
+        f"`/pause` · `/resume` alerts",
         parse_mode="Markdown"
     )
 
@@ -294,12 +330,12 @@ async def jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     all_jobs = await asyncio.to_thread(get_all_jobs)
     grouped = group_jobs(all_jobs)
     # Get grad year for tagging
-    grad_year = res.data[0].get("graduation_year", 2026) if res.data else 2026
+    grad_year = res.data[0].get("graduation_year", datetime.now().year) if res.data else datetime.now().year
 
     if res.data:
         matched = match_jobs_for_student(res.data[0], grouped)
         if matched:
-            display_jobs = [job for job, score in matched]
+            display_jobs = matched          # keep (job, score) pairs
             label = "matched"
         else:
             # Fallback: sample one job per company for variety
@@ -325,7 +361,11 @@ async def jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No open roles right now. You'll get an alert the moment something drops!")
         return
 
-    lines = [format_job_card(job, grad_year) for job in display_jobs[:5]]
+    if label == "matched":
+        student_data = res.data[0] if res.data else None
+        lines = [format_job_card(job, grad_year, score, student_data) for job, score in display_jobs[:5]]
+    else:
+        lines = [format_job_card(job, grad_year) for job in display_jobs[:5]]
 
     await update.message.reply_text(
         f"*Your {label} job matches:*\n━━━━━━━━━━━━━━━━━━━━━\n\n" + "\n\n".join(lines),
@@ -347,36 +387,52 @@ async def send_alerts(context: ContextTypes.DEFAULT_TYPE):
     students = supabase.table("students").select("*").execute().data
 
     for student in students:
-        matched = match_jobs_for_student(student, grouped_jobs)
-        send_jobs = [job for job, score in matched] if matched else []
-        if not send_jobs:
+        if student.get("paused"):   # skip users who paused alerts
             continue
-
+        matched = match_jobs_for_student(student, grouped_jobs)
+        send_pairs = matched if matched else []
+        if not send_pairs:
+            continue
         grad_year = student.get("graduation_year", 2026)
-        job_lines = [format_job_card(job, grad_year) for job in send_jobs]
+        job_lines = [format_job_card(job, grad_year, score, student) for job, score in send_pairs]
 
         TELEGRAM_LIMIT = 4000
         chunks, current_chunk, current_len = [], [], 0
-        for line in job_lines:
+        chunk_pairs = []   # track (job, score) per chunk for buttons
+        current_pairs = []
+        for (job, score), line in zip(send_pairs, job_lines):
             if current_len + len(line) + 2 > TELEGRAM_LIMIT and current_chunk:
                 chunks.append(current_chunk)
-                current_chunk, current_len = [], 0
+                chunk_pairs.append(current_pairs)
+                current_chunk, current_len, current_pairs = [], 0, []
             current_chunk.append(line)
+            current_pairs.append((job, score))
             current_len += len(line) + 2
         if current_chunk:
             chunks.append(current_chunk)
+            chunk_pairs.append(current_pairs)
 
         try:
             for i, chunk in enumerate(chunks):
                 part_info = f" ({i+1}/{len(chunks)})" if len(chunks) > 1 else ""
-                total = len(send_jobs)
+                total = len(send_pairs)
                 header = f"🔔 *HiringRadar — {total} New {'Opening' if total == 1 else 'Openings'}{part_info}*\n━━━━━━━━━━━━━━━━━━━━━\n"
                 digest = header + "\n\n".join(chunk) + "\n\n━━━━━━━━━━━━━━━━━━━━━"
+                # Build one feedback button per job in this chunk
+                buttons = []
+                for job, _ in chunk_pairs[i]:
+                    url_hash = hashlib.md5(job["url"].encode()).hexdigest()[:10]
+                    buttons.append([
+                        InlineKeyboardButton("👍 Relevant", callback_data=f"feedback:relevant:{url_hash}"),
+                        InlineKeyboardButton("👎 Not for me", callback_data=f"feedback:skip:{url_hash}"),
+                    ])
+                keyboard = InlineKeyboardMarkup(buttons)
                 await context.bot.send_message(
                     chat_id=student['chat_id'],
                     text=digest,
                     parse_mode="Markdown",
-                    disable_web_page_preview=True
+                    disable_web_page_preview=True,
+                    reply_markup=keyboard
                 )
                 await asyncio.sleep(0.1)
         except Forbidden:
@@ -385,6 +441,70 @@ async def send_alerts(context: ContextTypes.DEFAULT_TYPE):
             await asyncio.sleep(e.retry_after)
         except Exception as e:
             print(f"Failed to send to {student['chat_id']}: {e}")
+
+async def update_skills(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    if not context.args:
+        await update.message.reply_text("Usage: /skills Python, ML, React")
+        return
+    skills = [s.strip() for s in " ".join(context.args).split(",")]
+    supabase.table("students").update({"skills": skills}).eq("chat_id", chat_id).execute()
+    await update.message.reply_text(f"✅ Skills updated: {', '.join(skills)}")
+
+async def update_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    valid = list(keyword_map.keys())  # backend, frontend, ml, data, devops, fullstack, android, ios
+    if not context.args:
+        await update.message.reply_text(f"Usage: /roles backend, ml\nValid options: {', '.join(valid)}")
+        return
+    roles = [s.strip().lower() for s in " ".join(context.args).split(",")]
+    invalid = [r for r in roles if r not in valid]
+    if invalid:
+        await update.message.reply_text(f"❌ Unknown roles: {', '.join(invalid)}\nValid: {', '.join(valid)}")
+        return
+    supabase.table("students").update({"preferred_roles": roles}).eq("chat_id", chat_id).execute()
+    await update.message.reply_text(f"✅ Roles updated: {', '.join(roles)}")
+
+async def update_experience(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    if not context.args:
+        await update.message.reply_text("Usage: /experience internship\nOptions: internship / fulltime / both")
+        return
+    job_type = context.args[0].strip().lower()
+    if job_type not in ["internship", "fulltime", "both"]:
+        await update.message.reply_text("Please send: internship / fulltime / both")
+        return
+    supabase.table("students").update({"job_type": job_type}).eq("chat_id", chat_id).execute()
+    await update.message.reply_text(f"✅ Looking for: {job_type}")
+
+
+async def pause_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    supabase.table("students").update({"paused": True}).eq("chat_id", chat_id).execute()
+    await update.message.reply_text("⏸️ Alerts paused. Send /resume to turn them back on.")
+
+async def resume_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    supabase.table("students").update({"paused": False}).eq("chat_id", chat_id).execute()
+    await update.message.reply_text("▶️ Alerts resumed! You'll get the next batch soon.")
+
+
+async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()   # stops the loading spinner on the button
+    _, feedback, url_hash = query.data.split(":", 2)
+    chat_id = query.from_user.id
+    try:
+        supabase.table("job_feedback").insert({
+            "chat_id": chat_id,
+            "job_url_hash": url_hash,
+            "feedback": feedback,
+        }).execute()
+    except Exception as e:
+        print(f"Feedback save failed: {e}")
+    label = "❤️ Saved!" if feedback == "relevant" else "👍 Got it!"
+    await query.edit_message_reply_markup(reply_markup=None)  # remove buttons
+    await query.message.reply_text(label)
 
 # ── Main ───────────────────────────────────────────────────────────────────
 
@@ -415,6 +535,12 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("profile", profile))
     app.add_handler(CommandHandler("jobs", jobs))
     app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(CommandHandler("skills", update_skills))
+    app.add_handler(CommandHandler("roles", update_roles))
+    app.add_handler(CommandHandler("experience", update_experience))
+    app.add_handler(CommandHandler("pause", pause_alerts))
+    app.add_handler(CommandHandler("resume", resume_alerts))
+    app.add_handler(CallbackQueryHandler(feedback_handler, pattern="^feedback:"))
     app.job_queue.run_repeating(send_alerts, interval=300, first=10)
 
     print("🚀 HiringRadar backend engine online and scanning...")
