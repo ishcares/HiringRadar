@@ -1,6 +1,6 @@
 import os
 import asyncio
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.error import Forbidden, RetryAfter
 from telegram.ext import (
     ApplicationBuilder, CommandHandler,
@@ -186,9 +186,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     res = supabase.table("students").select("*").eq("chat_id", chat_id).execute()
     if res.data:
         student = res.data[0]
+        paused_status = "⏸️ Paused" if student.get("paused") else "🟢 Active"
         await update.message.reply_text(
             f"👋 Welcome back, *{student['name']}*!\n\n"
-            f"Type /profile to see your profile or /jobs to see latest matches.",
+            f"🔔 Alerts: {paused_status}\n\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"📦 *What can I do?*\n"
+            f"/jobs — see your latest matches\n"
+            f"/profile — view \u0026 update your profile\n"
+            f"/skills Python, ML — update skills\n"
+            f"/roles backend, ml — update roles\n"
+            f"/experience internship — update job type\n"
+            f"/pause · /resume — toggle alerts\n"
+            f"/stats — see active users",
             parse_mode="Markdown"
         )
         return ConversationHandler.END
@@ -542,6 +552,19 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("resume", resume_alerts))
     app.add_handler(CallbackQueryHandler(feedback_handler, pattern="^feedback:"))
     app.job_queue.run_repeating(send_alerts, interval=300, first=10)
+
+    # Register command menu — shows suggestions when users type "/" in chat
+    await app.bot.set_my_commands([
+        BotCommand("jobs",       "See your latest job matches"),
+        BotCommand("profile",    "View and update your profile"),
+        BotCommand("skills",     "Update your skills"),
+        BotCommand("roles",      "Update preferred roles"),
+        BotCommand("experience", "Update job type preference"),
+        BotCommand("pause",      "Pause job alerts"),
+        BotCommand("resume",     "Resume job alerts"),
+        BotCommand("stats",      "See active user count"),
+        BotCommand("start",      "Set up or restart your profile"),
+    ])
 
     print("🚀 HiringRadar backend engine online and scanning...")
     app.run_polling()
