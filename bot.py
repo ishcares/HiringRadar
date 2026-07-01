@@ -7,7 +7,8 @@ from telegram.ext import (
     MessageHandler, ContextTypes, 
     ConversationHandler, filters
 )
-from scraper import get_new_jobs, get_all_jobs, remove_subscriber, count_subscribers
+from scraper import get_new_jobs, get_all_jobs, count_subscribers
+from database import datetime
 from supabase import create_client
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -51,7 +52,7 @@ def get_experience_tag(title):
     return "💼 Mid-level (2-5 yrs)"
 
 def get_graduation_tag(title: str, grad_year: int) -> str:
-    current_year = 2026
+    current_year = datetime.now().year
     years_to_grad = grad_year - current_year
     exp_tag = get_experience_tag(title)
 
@@ -108,12 +109,18 @@ def match_jobs_for_student(student: dict, jobs: list, top_n=10, threshold=0.25):
         return []
 
     # Boost fresher/intern roles for students graduating 2025-2027
-    grad_year = student.get("graduation_year", 2026)
-    if grad_year >= 2025:
-        fresher_jobs = [j for j in jobs if any(k in j["title"].lower() for k in
-            ["intern", "internship", "fresher", "junior", "graduate", "new grad", "sde-1", "sde1", "associate"])]
-        if fresher_jobs:
-            jobs = fresher_jobs
+    current_year = datetime.now().year
+    grad_year = student.get("graduation_year", current_year)
+    if grad_year >= current_year-1:
+        fresher_keywords = ["intern","internship","fresher","junior","graduate","new grad","sde-1,"sde1", "associate"]
+        senior_tag ={"👑 Director / VP", "🏆 Manager / Lead", "⚡ Staff / Principal", "🚀 Senior (5+ yrs)"}
+        jobs = [
+             j for j in jobs
+             if any(k in j["title"].lower()for k in fresher_keywords)
+             or get_experience_tag(j["title"]) not in senior_tags
+        ]
+        if not jobs:
+            return []
 
     skills = ", ".join(student.get("skills") or [])
     role_str = ", ".join(roles)
@@ -179,11 +186,20 @@ async def get_branch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return GRAD_YEAR
 
 async def get_grad_year(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    current_year = datetime.now().year
     try:
-        context.user_data['graduation_year'] = int(update.message.text.strip())
+        year = int(update.message.text.strip())
     except ValueError:
-        await update.message.reply_text("Please send a valid year like 2026.")
+        await update.message.reply_text(f"Please send a valid year like {current_year}.")
         return GRAD_YEAR
+    if not (current_year - 10 <= year <= current_year + 6):
+        await update.message.reply_text(
+            f"That doesn't look right - please send a graduation year between "
+            f"{current_year - 10} and {current_year + 6}."
+        )
+        return GRAD_YEAR
+    context.use_data['graduation_year'] = year
+    
     await update.message.reply_text(
         "💻 What are your top skills?\n\nSend comma separated: *Python, React, SQL, ML*",
         parse_mode="Markdown"
@@ -245,6 +261,7 @@ async def get_job_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
     return ConversationHandler.END
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Setup cancelled. Type /start to begin again.")
     return ConversationHandler.END
@@ -331,8 +348,7 @@ async def send_alerts(context: ContextTypes.DEFAULT_TYPE):
 
     for student in students:
         matched = match_jobs_for_student(student, grouped_jobs)
-        send_jobs = [job for job, score in matched] if matched else grouped_jobs
-
+        send_jobs = [job for job, score in matched] if matched else []
         if not send_jobs:
             continue
 
@@ -370,35 +386,6 @@ async def send_alerts(context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print(f"Failed to send to {student['chat_id']}: {e}")
 
-
-
-ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID"))
-
-async def broadcast_profile_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != ADMIN_CHAT_ID:
-        return
-
-    students = supabase.table("students").select("chat_id").execute().data
-    sent = 0
-    for s in students:
-        try:
-            await context.bot.send_message(
-                chat_id=s['chat_id'],
-                text=(
-                    "👋 *Quick update from HiringRadar!*\n\n"
-                    "We're tweaking how job matching works behind the scenes "
-                    "to get you more relevant roles — you might notice slightly "
-                    "different results over the next few days while we tune it.\n\n"
-                    "No action needed on your end 🙌"
-                ),
-                parse_mode="Markdown"
-            )
-            sent += 1
-            await asyncio.sleep(0.1)
-        except Exception as e:
-            print(f"Failed to message {s['chat_id']}: {e}")
-    await update.message.reply_text(f"✅ Sent to {sent} students.")
-
 # ── Main ───────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -414,12 +401,12 @@ if __name__ == "__main__":
             ROLES:     [MessageHandler(filters.TEXT & ~filters.COMMAND, get_roles)],
             JOB_TYPE:  [MessageHandler(filters.TEXT & ~filters.COMMAND, get_job_type)],
         },
-    fallbacks=[
-        CommandHandler("cancel", cancel),
-        CommandHandler("start", start),
-        CommandHandler("stats", stats),
-        CommandHandler("profile", profile),
-        CommandHandler("jobs", jobs),
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            CommandHandler("start", start),
+            CommandHandler("stats", stats),
+            CommandHandler("profile", profile),
+            CommandHandler("jobs", jobs),
         ],
         allow_reentry=True,
     )
@@ -428,12 +415,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("profile", profile))
     app.add_handler(CommandHandler("jobs", jobs))
     app.add_handler(CommandHandler("stats", stats))
-    app.add_handler(CommandHandler("broadcast", broadcast_profile_setup))
     app.job_queue.run_repeating(send_alerts, interval=300, first=10)
-    
 
     print("🚀 HiringRadar backend engine online and scanning...")
     app.run_polling()
-
-    
-
