@@ -516,10 +516,25 @@ async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_reply_markup(reply_markup=None)  # remove buttons
     await query.message.reply_text(label)
 
+
 # ── Main ───────────────────────────────────────────────────────────────────
 
+async def on_startup(app):
+    """Runs once after the bot initialises — safe place for async setup."""
+    await app.bot.set_my_commands([
+        BotCommand("jobs",       "See your latest job matches"),
+        BotCommand("profile",    "View and update your profile"),
+        BotCommand("skills",     "Update your skills"),
+        BotCommand("roles",      "Update preferred roles"),
+        BotCommand("experience", "Update job type preference"),
+        BotCommand("pause",      "Pause job alerts"),
+        BotCommand("resume",     "Resume job alerts"),
+        BotCommand("stats",      "See active user count"),
+        BotCommand("start",      "Set up or restart your profile"),
+    ])
+
 if __name__ == "__main__":
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app = ApplicationBuilder().token(BOT_TOKEN).post_init(on_startup).build()
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
@@ -552,19 +567,6 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("resume", resume_alerts))
     app.add_handler(CallbackQueryHandler(feedback_handler, pattern="^feedback:"))
     app.job_queue.run_repeating(send_alerts, interval=300, first=10)
-
-    # Register command menu — shows suggestions when users type "/" in chat
-    await app.bot.set_my_commands([
-        BotCommand("jobs",       "See your latest job matches"),
-        BotCommand("profile",    "View and update your profile"),
-        BotCommand("skills",     "Update your skills"),
-        BotCommand("roles",      "Update preferred roles"),
-        BotCommand("experience", "Update job type preference"),
-        BotCommand("pause",      "Pause job alerts"),
-        BotCommand("resume",     "Resume job alerts"),
-        BotCommand("stats",      "See active user count"),
-        BotCommand("start",      "Set up or restart your profile"),
-    ])
 
     print("🚀 HiringRadar backend engine online and scanning...")
     app.run_polling()
