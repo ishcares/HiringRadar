@@ -1,7 +1,7 @@
 import os
 import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
-from telegram.error import Forbidden, RetryAfter
+from telegram.error import Forbidden, RetryAfter, TimedOut, NetworkError
 from telegram.ext import (
     ApplicationBuilder, CommandHandler,
     MessageHandler, ContextTypes,
@@ -83,15 +83,19 @@ keyword_map = {
     "ios":       ["ios", "swift"],
 }
 
+import re
+
 def matches_role(title: str, roles: list) -> bool:
     if not roles:
         return True
     title_lower = title.lower()
     for role in roles:
         keywords = keyword_map.get(role, [role])
-        if any(k in title_lower for k in keywords):
-            return True
+        for k in keywords:
+            if re.search(rf"\b{re.escape(k)}\b", title_lower):
+                return True
     return False
+
 
 def is_internship(job: dict) -> bool:
     return any(k in job['title'].lower() for k in ["intern", "internship", "trainee"])
@@ -101,6 +105,50 @@ def filter_by_job_type(jobs: list, job_type: str) -> list:
         return jobs
     return [j for j in jobs if (job_type == "internship") == is_internship(j)]
 
+# Common abbreviations to expand before embedding so the model understands them
+_ABBREV = {
+    "engg": "engineering", "eng": "engineering", "swe": "software engineer",
+    "sde": "software development engineer", "dev": "developer",
+    "ai": "artificial intelligence", "ml": "machine learning",
+    "nlp": "natural language processing", "cv": "computer vision",
+    "fe": "frontend", "be": "backend", "fs": "fullstack",
+    "ios": "iOS mobile", "infra": "infrastructure",
+    "intern": "internship", "jr": "junior", "sr": "senior",
+}
+
+def _expand_title(title: str) -> str:
+    """Expand abbreviations in job titles before embedding."""
+    words = title.lower().split()
+    return " ".join(_ABBREV.get(w.strip(".,/-"), w) for w in words)
+
+def _build_profile_text(student: dict) -> str:
+    """Build a rich, descriptive profile string for better embedding signal."""
+    roles = student.get("preferred_roles") or []
+    skills = student.get("skills") or []
+    job_type = student.get("job_type", "both")
+    grad_year = student.get("graduation_year", datetime.now().year)
+    current_year = datetime.now().year
+    years_left = grad_year - current_year
+
+    role_descriptions = {
+        "backend": "backend server-side API development",
+        "frontend": "frontend UI web development React",
+        "ml": "machine learning AI deep learning data science NLP",
+        "data": "data engineering analytics SQL pipeline ETL",
+        "devops": "DevOps cloud infrastructure Kubernetes SRE",
+        "fullstack": "fullstack web development frontend backend",
+        "android": "Android mobile Kotlin app development",
+        "ios": "iOS Swift mobile app development",
+    }
+    role_desc = " and ".join(role_descriptions.get(r, r) for r in roles)
+    exp_level = "internship or entry-level fresher" if years_left >= 0 else "software engineer"
+
+    return (
+        f"I am a {exp_level} looking for {job_type} roles in {role_desc}. "
+        f"My technical skills include {', '.join(skills)}. "
+        f"I am interested in software engineering and technology positions."
+    )
+
 def match_jobs_for_student(student: dict, jobs: list, top_n=10, threshold=0.25):
     jobs = filter_by_job_type(jobs, student.get("job_type", "both"))
     roles = student.get("preferred_roles") or []
@@ -109,36 +157,65 @@ def match_jobs_for_student(student: dict, jobs: list, top_n=10, threshold=0.25):
     if not jobs:
         return []
 
-    # Boost fresher/intern roles for students graduating 2025-2027
+    # Filter out overly senior roles for recent grads
     current_year = datetime.now().year
     grad_year = student.get("graduation_year", current_year)
-    if grad_year >= current_year-1:
-        fresher_keywords = ["intern","internship","fresher","junior","graduate","new grad","sde-1","sde1", "associate"]
-        senior_tags ={"👑 Director / VP", "🏆 Manager / Lead", "⚡ Staff / Principal", "🚀 Senior (5+ yrs)"}
-        jobs = [
-             j for j in jobs
-             if any(k in j["title"].lower()for k in fresher_keywords)
-             or get_experience_tag(j["title"]) not in senior_tags
+    if grad_year >= current_year - 1:
+        fresher_keywords = ["intern", "internship", "fresher", "junior", "graduate", "new grad", "sde-1", "sde1", "associate", "entry"]
+        # Roles that are clearly NOT for fresh grads
+        non_fresher_tags = {
+            "👑 Director / VP", "🏆 Manager / Lead",
+            "⚡ Staff / Principal", "🚀 Senior (5+ yrs)",
+            "💼 Mid-level (2-5 yrs)"   # ← also exclude mid-level for fresh grads
+        }
+        # First pass: prefer explicit fresher/intern titles, ensuring no senior leak
+        fresher_jobs = [
+            j for j in jobs
+            if any(k in j["title"].lower() for k in fresher_keywords)
+            and get_experience_tag(j["title"]) not in non_fresher_tags
         ]
+        # Second pass: include generic SWE titles (e.g. "Software Engineer") that
+        # aren't explicitly senior — but only if no fresher-tagged jobs exist
+        generic_ok = [
+            j for j in jobs
+            if get_experience_tag(j["title"]) not in non_fresher_tags
+            and j not in fresher_jobs
+        ]
+        jobs = fresher_jobs if fresher_jobs else generic_ok
         if not jobs:
             return []
 
-    skills = ", ".join(student.get("skills") or [])
-    role_str = ", ".join(roles)
-    profile_text = f"{role_str} developer with skills in {skills}."
 
-    # Enrich job text with company + location
+    # Build rich profile text and expand job title abbreviations before embedding
+    profile_text = _build_profile_text(student)
     job_texts = [
-        f"{j['title']} at {j['company']} in {j.get('location', '')}".strip()
+        f"{_expand_title(j['title'])} at {j['company']} in {j.get('location', '')}".strip()
         for j in jobs
     ]
 
     profile_emb = model.encode([profile_text])
     job_embs = model.encode(job_texts)
-    scores = cosine_similarity(profile_emb, job_embs)[0]
+    scores = cosine_similarity(profile_emb, job_embs)[0].tolist()
+
+    # Role-match bonus: if the job clearly matches a preferred role, add +0.15
+    for i, job in enumerate(jobs):
+        if matches_role(job["title"], roles):
+            scores[i] = min(1.0, scores[i] + 0.15)
+        # Extra bonus for intern/fresher match when student is a recent grad
+        if grad_year >= current_year - 1 and is_internship(job):
+            scores[i] = min(1.0, scores[i] + 0.05)
 
     ranked = sorted(zip(jobs, scores), key=lambda x: x[1], reverse=True)
-    return [(job, score) for job, score in ranked if score >= threshold][:top_n]
+    results = [(job, score) for job, score in ranked if score >= threshold][:top_n]
+    # Rescale raw cosine (realistic range ~0.25-0.75) to a display-friendly 0-100
+    DISPLAY_FLOOR, DISPLAY_CEIL = 0.25, 0.75
+    rescaled = []
+    for job, score in results:
+        display_score = (score - DISPLAY_FLOOR) / (DISPLAY_CEIL - DISPLAY_FLOOR)
+        display_score = max(0.0, min(1.0, display_score))
+        rescaled.append((job, round(display_score, 4)))
+    return rescaled
+
 
 def build_match_reason(job: dict, student: dict) -> str:
     """Build a short human-readable explanation of why a job matched."""
@@ -449,6 +526,33 @@ async def send_alerts(context: ContextTypes.DEFAULT_TYPE):
             supabase.table("students").delete().eq("chat_id", student['chat_id']).execute()
         except RetryAfter as e:
             await asyncio.sleep(e.retry_after)
+        except (TimedOut, NetworkError) as e:
+            # Transient delivery issue — wait a moment and retry once
+            await asyncio.sleep(5)
+            try:
+                for i, chunk in enumerate(chunks):
+                    part_info = f" ({i+1}/{len(chunks)})" if len(chunks) > 1 else ""
+                    total = len(send_pairs)
+                    header = f"🔔 *HiringRadar — {total} New {'Opening' if total == 1 else 'Openings'}{part_info}*\n━━━━━━━━━━━━━━━━━━━━━\n"
+                    digest = header + "\n\n".join(chunk) + "\n\n━━━━━━━━━━━━━━━━━━━━━"
+                    buttons = []
+                    for job, _ in chunk_pairs[i]:
+                        url_hash = hashlib.md5(job["url"].encode()).hexdigest()[:10]
+                        buttons.append([
+                            InlineKeyboardButton("👍 Relevant", callback_data=f"feedback:relevant:{url_hash}"),
+                            InlineKeyboardButton("👎 Not for me", callback_data=f"feedback:skip:{url_hash}"),
+                        ])
+                    keyboard = InlineKeyboardMarkup(buttons)
+                    await context.bot.send_message(
+                        chat_id=student['chat_id'],
+                        text=digest,
+                        parse_mode="Markdown",
+                        disable_web_page_preview=True,
+                        reply_markup=keyboard
+                    )
+                    await asyncio.sleep(0.1)
+            except Exception as retry_err:
+                print(f"Failed to send to {student['chat_id']} after retry: {retry_err}")
         except Exception as e:
             print(f"Failed to send to {student['chat_id']}: {e}")
 
