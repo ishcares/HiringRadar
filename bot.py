@@ -11,15 +11,42 @@ import hashlib
 from scraper import get_new_jobs, get_all_jobs, count_subscribers
 from datetime import datetime
 from supabase import create_client
-from sentence_transformers import SentenceTransformer
-from sklearn.metrics.pairwise import cosine_similarity
+import math
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
-model = SentenceTransformer('all-MiniLM-L6-v2')
+
+def get_embeddings_from_hf(texts: list) -> list:
+    """Gets text embeddings from Hugging Face Inference API."""
+    api_url = "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2"
+    headers = {}
+    hf_token = os.getenv("HF_TOKEN")
+    if hf_token:
+        headers["Authorization"] = f"Bearer {hf_token}"
+    
+    try:
+        response = requests.post(api_url, headers=headers, json={"inputs": texts}, timeout=15)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            print(f"HF API error: {response.status_code} - {response.text}")
+    except Exception as e:
+        print(f"Failed to fetch embeddings from HF API: {e}")
+    return []
+
+def calculate_cosine_similarity(v1: list, v2: list) -> float:
+    """Calculates cosine similarity between two vectors."""
+    dot_product = sum(x * y for x, y in zip(v1, v2))
+    magnitude1 = math.sqrt(sum(x * x for x in v1))
+    magnitude2 = math.sqrt(sum(x * x for x in v2))
+    if not magnitude1 or not magnitude2:
+        return 0.0
+    return dot_product / (magnitude1 * magnitude2)
+
 
 # Conversation states
 NAME, BRANCH, GRAD_YEAR, SKILLS, ROLES, JOB_TYPE = range(6)
@@ -193,9 +220,16 @@ def match_jobs_for_student(student: dict, jobs: list, top_n=10, threshold=0.25):
         for j in jobs
     ]
 
-    profile_emb = model.encode([profile_text])
-    job_embs = model.encode(job_texts)
-    scores = cosine_similarity(profile_emb, job_embs)[0].tolist()
+    all_texts = [profile_text] + job_texts
+    embeddings = get_embeddings_from_hf(all_texts)
+
+    if not embeddings or len(embeddings) < 2:
+        # Fallback if API fails
+        scores = [0.3] * len(jobs)
+    else:
+        profile_emb = embeddings[0]
+        job_embs = embeddings[1:]
+        scores = [calculate_cosine_similarity(profile_emb, j_emb) for j_emb in job_embs]
 
     # Role-match bonus: if the job clearly matches a preferred role, add +0.15
     for i, job in enumerate(jobs):
