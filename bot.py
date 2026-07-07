@@ -505,6 +505,28 @@ async def send_alerts(context: ContextTypes.DEFAULT_TYPE):
     if not new_jobs:
         return
     grouped_jobs = group_jobs(new_jobs)
+
+    # --- Post to Telegram Channel (if configured) ---
+    CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
+    if CHANNEL_ID:
+        bot_username = context.bot.username
+        for job in grouped_jobs:
+            try:
+                card = format_job_card(job)
+                text_msg = (
+                    f"📢 *New Job Alert!*\n━━━━━━━━━━━━━━━━━━━━━\n\n{card}\n\n"
+                    f"🤖 *[Get Personalized Match Alerts](https://t.me/{bot_username})*"
+                )
+                await context.bot.send_message(
+                    chat_id=CHANNEL_ID,
+                    text=text_msg,
+                    parse_mode="Markdown",
+                    disable_web_page_preview=True
+                )
+                await asyncio.sleep(1)  # rate limit buffer
+            except Exception as e:
+                print(f"Failed to post to channel {CHANNEL_ID}: {e}")
+
     students = supabase.table("students").select("*").execute().data
 
     for student in students:
