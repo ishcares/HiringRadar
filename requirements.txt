@@ -12,4 +12,6 @@ python-telegram-bot[job-queue]==21.11.1
 supabase
 sentence-transformers
 scikit-learn
-playwright
+playwright
+fastapi
+uvicorn

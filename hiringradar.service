@@ -1,0 +1,26 @@
+[Unit]
+Description=HiringRadar Telegram Bot
+After=network-online.target postgresql.service
+Wants=network-online.target postgresql.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/hiringradar
+EnvironmentFile=/home/ubuntu/hiringradar/.env
+ExecStart=/home/ubuntu/hiringradar/venv/bin/python bot.py
+Restart=always
+RestartSec=15
+# Allow extra time on first boot for sentence-transformers to download model
+TimeoutStartSec=180
+
+# Memory guard for the 1 GB AMD free VM
+MemoryMax=900M
+
+# Logging — view with: sudo journalctl -u hiringradar -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=hiringradar
+
+[Install]
+WantedBy=multi-user.target

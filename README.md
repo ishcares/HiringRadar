@@ -1,4 +1,15 @@
+---
+title: HiringRadar
+emoji: 🎯
+colorFrom: blue
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
+---
+
 # HiringRadar 🎯
+
 
 ## The Problem
 Freshers in India miss job and internship openings at top product companies 
