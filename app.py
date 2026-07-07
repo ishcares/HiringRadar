@@ -7,6 +7,7 @@ from bot import create_app
 app = FastAPI()
 
 @app.get("/")
+@app.head("/")
 def home():
     return {"status": "HiringRadar Bot is active and running!"}
 
