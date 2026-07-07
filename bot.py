@@ -637,8 +637,8 @@ async def on_startup(app):
         BotCommand("start",      "Set up or restart your profile"),
     ])
 
-if __name__ == "__main__":
-    app = ApplicationBuilder().token(BOT_TOKEN).post_init(on_startup).build()
+def create_app(token):
+    app = ApplicationBuilder().token(token).post_init(on_startup).build()
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
@@ -672,5 +672,10 @@ if __name__ == "__main__":
     app.add_handler(CallbackQueryHandler(feedback_handler, pattern="^feedback:"))
     app.job_queue.run_repeating(send_alerts, interval=300, first=10)
 
+    return app
+
+if __name__ == "__main__":
+    app = create_app(BOT_TOKEN)
     print("🚀 HiringRadar backend engine online and scanning...")
     app.run_polling()
+

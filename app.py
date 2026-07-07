@@ -2,8 +2,7 @@ import os
 import asyncio
 from fastapi import FastAPI
 import uvicorn
-from bot import ApplicationBuilder, conv_handler, profile, jobs, stats, update_skills, update_roles, update_experience, pause_alerts, resume_alerts, feedback_handler, send_alerts, on_startup, CallbackQueryHandler, CommandHandler
-from telegram.ext import MessageHandler, filters
+from bot import create_app
 
 app = FastAPI()
 
@@ -18,23 +17,8 @@ async def run_telegram_bot():
         print("❌ ERROR: BOT_TOKEN environment variable not set!")
         return
 
-    # Build the application exactly like bot.py does
-    application = ApplicationBuilder().token(BOT_TOKEN).post_init(on_startup).build()
-
-    # Add all handlers from bot.py
-    application.add_handler(conv_handler)
-    application.add_handler(CommandHandler("profile", profile))
-    application.add_handler(CommandHandler("jobs", jobs))
-    application.add_handler(CommandHandler("stats", stats))
-    application.add_handler(CommandHandler("skills", update_skills))
-    application.add_handler(CommandHandler("roles", update_roles))
-    application.add_handler(CommandHandler("experience", update_experience))
-    application.add_handler(CommandHandler("pause", pause_alerts))
-    application.add_handler(CommandHandler("resume", resume_alerts))
-    application.add_handler(CallbackQueryHandler(feedback_handler, pattern="^feedback:"))
-    
-    # Run the background job queue (scrapes every 5 mins)
-    application.job_queue.run_repeating(send_alerts, interval=300, first=10)
+    # Build the application using the creator function from bot.py
+    application = create_app(BOT_TOKEN)
 
     print("🚀 Starting Telegram Bot polling...")
     
