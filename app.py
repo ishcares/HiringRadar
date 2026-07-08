@@ -1,22 +1,22 @@
 import os
 import asyncio
 import logging
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 import uvicorn
 from bot import create_app
 
 class HealthCheckFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
-        # Prevent logging of HEAD / requests to avoid log spam
+        # Prevent logging of HEAD / and GET /favicon.ico requests to avoid log spam
         if record.args and len(record.args) >= 3:
             method = record.args[1]
             path = record.args[2]
-            if method == "HEAD" and path == "/":
+            if (method == "HEAD" and path == "/") or path == "/favicon.ico":
                 return False
         
         # Fallback check on formatted message
         message = record.getMessage()
-        if "HEAD / " in message:
+        if "HEAD / " in message or "/favicon.ico" in message:
             return False
         return True
 
@@ -26,6 +26,10 @@ app = FastAPI()
 @app.head("/")
 def home():
     return {"status": "HiringRadar Bot is active and running!"}
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    return Response(status_code=204)
 
 async def run_telegram_bot():
     """Runs the Telegram Bot alongside the FastAPI web server."""
