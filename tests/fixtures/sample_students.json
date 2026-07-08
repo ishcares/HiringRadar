@@ -1,0 +1,37 @@
+[
+  {
+    "name": "2026 Backend Intern",
+    "graduation_year": 2026,
+    "skills": ["Python", "Django", "SQL"],
+    "preferred_roles": ["backend"],
+    "job_type": "internship"
+  },
+  {
+    "name": "2025 ML Fulltime",
+    "graduation_year": 2025,
+    "skills": ["Python", "PyTorch", "NLP"],
+    "preferred_roles": ["ml"],
+    "job_type": "fulltime"
+  },
+  {
+    "name": "2027 Frontend Intern",
+    "graduation_year": 2027,
+    "skills": ["React", "JavaScript", "CSS"],
+    "preferred_roles": ["frontend"],
+    "job_type": "internship"
+  },
+  {
+    "name": "2026 Fullstack Both",
+    "graduation_year": 2026,
+    "skills": ["Node.js", "React", "MongoDB"],
+    "preferred_roles": ["fullstack"],
+    "job_type": "both"
+  },
+  {
+    "name": "2024 DevOps Grad",
+    "graduation_year": 2024,
+    "skills": ["Docker", "Kubernetes", "AWS"],
+    "preferred_roles": ["devops"],
+    "job_type": "fulltime"
+  }
+]

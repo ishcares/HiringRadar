@@ -1,0 +1,98 @@
+[
+  {
+    "company": "Razorpay",
+    "title": "Software Engineer Intern",
+    "location": "Bangalore, India",
+    "url": "https://example.com/razorpay-intern"
+  },
+  {
+    "company": "Razorpay",
+    "title": "Backend Engineer",
+    "location": "Bangalore, India",
+    "url": "https://example.com/razorpay-backend"
+  },
+  {
+    "company": "CRED",
+    "title": "Senior SDE II - Backend",
+    "location": "Bangalore, India",
+    "url": "https://example.com/cred-senior"
+  },
+  {
+    "company": "Groww",
+    "title": "Software Engineer",
+    "location": "Bangalore, India",
+    "url": "https://example.com/groww-swe"
+  },
+  {
+    "company": "PhonePe",
+    "title": "ML Engineer Intern",
+    "location": "Bangalore, India",
+    "url": "https://example.com/phonepe-ml-intern"
+  },
+  {
+    "company": "Postman",
+    "title": "Frontend Developer",
+    "location": "Bangalore, India",
+    "url": "https://example.com/postman-frontend"
+  },
+  {
+    "company": "Meesho",
+    "title": "DevOps Engineer",
+    "location": "Bangalore, India",
+    "url": "https://example.com/meesho-devops"
+  },
+  {
+    "company": "Stripe",
+    "title": "Data Engineer",
+    "location": "Remote - India",
+    "url": "https://example.com/stripe-data"
+  },
+  {
+    "company": "InMobi",
+    "title": "Android Developer Intern",
+    "location": "Bangalore, India",
+    "url": "https://example.com/inmobi-android"
+  },
+  {
+    "company": "Zeta",
+    "title": "Engineering Manager - Platform",
+    "location": "Bangalore, India",
+    "url": "https://example.com/zeta-em"
+  },
+  {
+    "company": "Figma",
+    "title": "iOS Engineer",
+    "location": "Remote",
+    "url": "https://example.com/figma-ios"
+  },
+  {
+    "company": "Coinbase",
+    "title": "Full Stack Engineer",
+    "location": "Remote - India",
+    "url": "https://example.com/coinbase-fullstack"
+  },
+  {
+    "company": "Salesforce",
+    "title": "Mid-level Software Engineer",
+    "location": "Hyderabad, India",
+    "url": "https://example.com/sf-mid"
+  },
+  {
+    "company": "Razorpay",
+    "title": "Backend Engineer Intern",
+    "location": "Bangalore, India",
+    "url": "https://example.com/razorpay-backend-intern"
+  },
+  {
+    "company": "DeepMind",
+    "title": "Machine Learning Engineer",
+    "location": "Bangalore, India",
+    "url": "https://example.com/deepmind-ml"
+  },
+  {
+    "company": "Paytm",
+    "title": "Customer Success Manager",
+    "location": "Noida, India",
+    "url": "https://example.com/paytm-cs"
+  }
+]

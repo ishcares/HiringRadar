@@ -1,0 +1,204 @@
+"""Tests for matching logic — no network, no Telegram, no Supabase."""
+
+import sys
+import json
+from pathlib import Path
+
+# Add root directory to path to allow direct imports
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+import pytest
+
+from embeddings import calculate_cosine_similarity
+from matching import (
+    build_match_reason,
+    filter_by_job_type,
+    get_experience_tag,
+    group_jobs,
+    is_internship,
+    match_jobs_for_student,
+    matches_role,
+    _filter_fresher_jobs,
+    _score_jobs,
+)
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+@pytest.fixture
+def sample_jobs():
+    with open(FIXTURES / "sample_jobs.json") as f:
+        return json.load(f)
+
+
+@pytest.fixture
+def sample_students():
+    with open(FIXTURES / "sample_students.json") as f:
+        return json.load(f)
+
+
+# ── Role matching ────────────────────────────────────────────────────────────
+
+class TestMatchesRole:
+    def test_backend_title_matches(self):
+        assert matches_role("Backend Engineer", ["backend"]) is True
+
+    def test_generic_swe_does_not_match_ml(self):
+        assert matches_role("Software Engineer", ["ml"]) is False
+
+    def test_empty_roles_matches_all(self):
+        assert matches_role("Anything", []) is True
+
+    def test_word_boundary_prevents_false_positive(self):
+        assert matches_role("Analyst", ["ml"]) is False
+
+
+# ── Job type filtering ───────────────────────────────────────────────────────
+
+class TestFilterByJobType:
+    def test_internship_only(self, sample_jobs):
+        intern_job = sample_jobs[0]  # Software Engineer Intern
+        fulltime_job = sample_jobs[1]  # Backend Engineer
+        result = filter_by_job_type([intern_job, fulltime_job], "internship")
+        assert len(result) == 1
+        assert is_internship(result[0])
+
+    def test_both_returns_all(self, sample_jobs):
+        assert len(filter_by_job_type(sample_jobs, "both")) == len(sample_jobs)
+
+
+# ── Experience tagging ───────────────────────────────────────────────────────
+
+class TestExperienceTag:
+    def test_intern_tagged_fresher(self):
+        assert "Fresher" in get_experience_tag("Software Engineer Intern")
+
+    def test_senior_tagged(self):
+        assert "Senior" in get_experience_tag("Senior SDE II - Backend")
+
+    def test_generic_swe_not_midlevel(self):
+        tag = get_experience_tag("Software Engineer")
+        assert tag == "💼 Software Engineer"
+        assert "Mid-level" not in tag
+
+
+# ── Fresher filtering ────────────────────────────────────────────────────────
+
+class TestFresherFilter:
+    def test_senior_filtered_for_2026_grad(self, sample_jobs):
+        jobs = [j for j in sample_jobs if matches_role(j["title"], ["backend"])]
+        filtered = _filter_fresher_jobs(jobs, grad_year=2026, current_year=2025)
+        titles = [j["title"] for j in filtered]
+        assert "Senior SDE II - Backend" not in titles
+
+    def test_generic_swe_kept_for_fresher(self, sample_jobs):
+        groww = next(j for j in sample_jobs if j["company"] == "Groww")
+        filtered = _filter_fresher_jobs([groww], grad_year=2026, current_year=2025)
+        assert len(filtered) == 1
+
+    def test_midlevel_filtered_for_fresher(self, sample_jobs):
+        mid = next(j for j in sample_jobs if "Mid-level" in j["title"])
+        filtered = _filter_fresher_jobs([mid], grad_year=2026, current_year=2025)
+        assert len(filtered) == 0
+
+
+# ── Scoring with mock embeddings ─────────────────────────────────────────────
+
+def _mock_embed_fn(texts):
+    """Return deterministic unit vectors: profile at [1,0,0], jobs vary."""
+    vectors = []
+    for i, text in enumerate(texts):
+        if i == 0:
+            vectors.append([1.0, 0.0, 0.0])
+        else:
+            # Slight variation per job index
+            angle = 0.1 * i
+            vectors.append([0.9, angle, 0.1])
+    return vectors
+
+
+class TestScoring:
+    def test_role_bonus_increases_score(self, sample_jobs):
+        student = {
+            "graduation_year": 2026,
+            "skills": ["Python"],
+            "preferred_roles": ["backend"],
+            "job_type": "both",
+        }
+        backend_job = next(j for j in sample_jobs if j["title"] == "Backend Engineer")
+        scores_with_bonus = _score_jobs([backend_job], student, ["backend"], _mock_embed_fn)
+        scores_no_bonus = _score_jobs([backend_job], student, ["ml"], _mock_embed_fn)
+        assert scores_with_bonus[0] > scores_no_bonus[0]
+
+    def test_hf_fallback_returns_default_scores(self, sample_jobs):
+        student = {
+            "graduation_year": 2026,
+            "skills": ["Python"],
+            "preferred_roles": ["backend"],
+            "job_type": "both",
+        }
+        job = sample_jobs[1]
+        scores = _score_jobs([job], student, ["backend"], lambda texts: [])
+        assert scores == [0.3]
+
+
+# ── End-to-end match (mocked embeddings) ─────────────────────────────────────
+
+class TestMatchJobsForStudent:
+    def test_backend_intern_persona(self, sample_jobs, sample_students):
+        student = sample_students[0]
+        matched = match_jobs_for_student(student, sample_jobs, embed_fn=_mock_embed_fn)
+        assert len(matched) > 0
+        titles = [j["title"] for j, _ in matched]
+        assert "Senior SDE II - Backend" not in titles
+        assert any("Intern" in t for t in titles)
+
+    def test_ml_persona_gets_ml_jobs(self, sample_jobs, sample_students):
+        student = sample_students[1]
+        matched = match_jobs_for_student(student, sample_jobs, embed_fn=_mock_embed_fn)
+        titles = [j["title"] for j, _ in matched]
+        assert any("Machine Learning" in t or "ML" in t for t in titles)
+
+    def test_threshold_filters_low_scores(self, sample_jobs, sample_students):
+        student = sample_students[0]
+
+        def low_similarity_embed(texts):
+            return [[1, 0, 0]] + [[0, 1, 0]] * (len(texts) - 1)
+
+        matched = match_jobs_for_student(
+            student, sample_jobs, threshold=0.25, embed_fn=low_similarity_embed
+        )
+        # Orthogonal vectors → cosine 0, even with +0.15 bonus = 0.15 < 0.25
+        assert len(matched) == 0
+
+    def test_empty_when_no_role_match(self, sample_jobs):
+        student = {
+            "graduation_year": 2026,
+            "skills": ["Python"],
+            "preferred_roles": ["ios"],
+            "job_type": "both",
+        }
+        # Only iOS job in fixtures
+        matched = match_jobs_for_student(student, sample_jobs, embed_fn=_mock_embed_fn)
+        assert len(matched) <= 1
+
+
+# ── Utilities ────────────────────────────────────────────────────────────────
+
+class TestUtilities:
+    def test_group_jobs_deduplicates(self, sample_jobs):
+        dup = sample_jobs[0]
+        grouped = group_jobs([dup, dup])
+        assert len(grouped) == 1
+        assert grouped[0]["count"] == 2
+
+    def test_cosine_identical_vectors(self):
+        v = [1.0, 2.0, 3.0]
+        assert calculate_cosine_similarity(v, v) == pytest.approx(1.0)
+
+    def test_build_match_reason_includes_role(self, sample_jobs, sample_students):
+        student = sample_students[0]
+        job = sample_jobs[1]  # Backend Engineer
+        reason = build_match_reason(job, student)
+        assert "Backend" in reason or "backend" in reason.lower()

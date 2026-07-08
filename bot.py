@@ -11,270 +11,23 @@ import hashlib
 from scraper import get_new_jobs, get_all_jobs, count_subscribers, has_student_seen_job, mark_student_seen_jobs, load_seen_jobs, save_seen_jobs
 from datetime import datetime
 from supabase import create_client
-import math
-import requests
 from dotenv import load_dotenv
+from matching import (
+    group_jobs,
+    get_experience_tag,
+    get_graduation_tag,
+    match_jobs_for_student,
+    build_match_reason,
+    keyword_map,
+)
 
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 
-def get_embeddings_from_hf(texts: list) -> list:
-    """Gets text embeddings from Hugging Face Inference API."""
-    api_url = "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2"
-    headers = {}
-    hf_token = os.getenv("HF_TOKEN")
-    if hf_token:
-        headers["Authorization"] = f"Bearer {hf_token}"
-    
-    try:
-        response = requests.post(api_url, headers=headers, json={"inputs": texts}, timeout=15)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            print(f"HF API error: {response.status_code} - {response.text}")
-    except Exception as e:
-        print(f"Failed to fetch embeddings from HF API: {e}")
-    return []
-
-def calculate_cosine_similarity(v1: list, v2: list) -> float:
-    """Calculates cosine similarity between two vectors."""
-    dot_product = sum(x * y for x, y in zip(v1, v2))
-    magnitude1 = math.sqrt(sum(x * x for x in v1))
-    magnitude2 = math.sqrt(sum(x * x for x in v2))
-    if not magnitude1 or not magnitude2:
-        return 0.0
-    return dot_product / (magnitude1 * magnitude2)
-
-
 # Conversation states
 NAME, BRANCH, GRAD_YEAR, SKILLS, ROLES, JOB_TYPE = range(6)
-
-# ── Helpers ──────────────────────────────────────────
-
-def group_jobs(jobs):
-    seen = {}
-    for job in jobs:
-        key = (job['company'], job['title'].strip(), job['location'])
-        if key not in seen:
-            seen[key] = {**job, 'count': 1}
-        else:
-            seen[key]['count'] += 1
-    return list(seen.values())
-
-def get_experience_tag(title):
-    t = title.lower()
-    if any(k in t for k in ["intern", "internship", "trainee", "campus", "fresher", "new grad"]):
-        return "🌱 Fresher / Intern"
-    if any(k in t for k in ["director", "vp ", "vice president", "head of", "chief"]):
-        return "👑 Director / VP"
-    if any(k in t for k in ["engineering manager", "tech lead", "team lead", "lead engineer", "engineering lead"]):
-        return "🏆 Manager / Lead"
-    if any(k in t for k in ["principal", "staff", "architect", "sde-3", "sde iii"]):
-        return "⚡ Staff / Principal"
-    if any(k in t for k in ["senior", "sr.", "sde-2", "sde ii"]):
-        return "🚀 Senior (5+ yrs)"
-    if any(k in t for k in ["junior", "jr.", "sde-1", "sde i", "associate"]):
-        return "🔵 Junior (0-2 yrs)"
-    if any(k in t for k in ["mid-level", "mid level", "experienced"]):
-        return "💼 Mid-level (2-5 yrs)"
-    return "💼 Software Engineer"
-
-def get_graduation_tag(title: str, grad_year: int) -> str:
-    current_year = datetime.now().year
-    years_to_grad = grad_year - current_year
-    exp_tag = get_experience_tag(title)
-
-    if years_to_grad <= 0:
-        if any(x in exp_tag for x in ["Fresher", "Intern", "Junior"]):
-            return "✅ Good for you"
-        return "⚠️ May need experience"
-    elif years_to_grad == 1:
-        if any(x in exp_tag for x in ["Fresher", "Intern"]):
-            return "✅ Good for you"
-        return "⚠️ May need experience"
-    else:
-        if "Intern" in exp_tag:
-            return "✅ Good for you"
-        return "⚠️ Check requirements"
-
-# ── Matching ───────────────────────────────────────────────────────────────
-
-keyword_map = {
-    "backend":   ["backend", "server", "api", "django", "node", "golang", "java", "spring"],
-    "frontend":  ["frontend", "react", "vue", "angular", "ui", "javascript", "css"],
-    "ml":        ["machine learning", "ml", "ai", "deep learning", "nlp", "data science"],
-    "data":      ["data engineer", "data analyst", "analytics", "sql", "etl"],
-    "devops":    ["devops", "sre", "cloud", "kubernetes", "docker", "infrastructure"],
-    "fullstack": ["fullstack", "full stack", "full-stack"],
-    "android":   ["android", "kotlin"],
-    "ios":       ["ios", "swift"],
-}
-
-import re
-
-def matches_role(title: str, roles: list) -> bool:
-    if not roles:
-        return True
-    title_lower = title.lower()
-    for role in roles:
-        keywords = keyword_map.get(role, [role])
-        for k in keywords:
-            if re.search(rf"\b{re.escape(k)}\b", title_lower):
-                return True
-    return False
-
-
-def is_internship(job: dict) -> bool:
-    return any(k in job['title'].lower() for k in ["intern", "internship", "trainee"])
-
-def filter_by_job_type(jobs: list, job_type: str) -> list:
-    if job_type == "both" or not job_type:
-        return jobs
-    return [j for j in jobs if (job_type == "internship") == is_internship(j)]
-
-# Common abbreviations to expand before embedding so the model understands them
-_ABBREV = {
-    "engg": "engineering", "eng": "engineering", "swe": "software engineer",
-    "sde": "software development engineer", "dev": "developer",
-    "ai": "artificial intelligence", "ml": "machine learning",
-    "nlp": "natural language processing", "cv": "computer vision",
-    "fe": "frontend", "be": "backend", "fs": "fullstack",
-    "ios": "iOS mobile", "infra": "infrastructure",
-    "intern": "internship", "jr": "junior", "sr": "senior",
-}
-
-def _expand_title(title: str) -> str:
-    """Expand abbreviations in job titles before embedding."""
-    words = title.lower().split()
-    return " ".join(_ABBREV.get(w.strip(".,/-"), w) for w in words)
-
-def _build_profile_text(student: dict) -> str:
-    """Build a rich, descriptive profile string for better embedding signal."""
-    roles = student.get("preferred_roles") or []
-    skills = student.get("skills") or []
-    job_type = student.get("job_type", "both")
-    grad_year = student.get("graduation_year", datetime.now().year)
-    current_year = datetime.now().year
-    years_left = grad_year - current_year
-
-    role_descriptions = {
-        "backend": "backend server-side API development",
-        "frontend": "frontend UI web development React",
-        "ml": "machine learning AI deep learning data science NLP",
-        "data": "data engineering analytics SQL pipeline ETL",
-        "devops": "DevOps cloud infrastructure Kubernetes SRE",
-        "fullstack": "fullstack web development frontend backend",
-        "android": "Android mobile Kotlin app development",
-        "ios": "iOS Swift mobile app development",
-    }
-    role_desc = " and ".join(role_descriptions.get(r, r) for r in roles)
-    exp_level = "internship or entry-level fresher" if years_left >= 0 else "software engineer"
-
-    return (
-        f"I am a {exp_level} looking for {job_type} roles in {role_desc}. "
-        f"My technical skills include {', '.join(skills)}. "
-        f"I am interested in software engineering and technology positions."
-    )
-
-def match_jobs_for_student(student: dict, jobs: list, top_n=10, threshold=0.25):
-    jobs = filter_by_job_type(jobs, student.get("job_type", "both"))
-    roles = student.get("preferred_roles") or []
-    jobs = [j for j in jobs if matches_role(j["title"], roles)]
-
-    if not jobs:
-        return []
-
-    # Filter out overly senior roles for recent grads
-    current_year = datetime.now().year
-    grad_year = student.get("graduation_year", current_year)
-    if grad_year >= current_year - 1:
-        fresher_keywords = ["intern", "internship", "fresher", "junior", "graduate", "new grad", "sde-1", "sde1", "associate", "entry"]
-        # Roles that are clearly NOT for fresh grads
-        non_fresher_tags = {
-            "👑 Director / VP", "🏆 Manager / Lead",
-            "⚡ Staff / Principal", "🚀 Senior (5+ yrs)",
-            "💼 Mid-level (2-5 yrs)"   # ← also exclude mid-level for fresh grads
-        }
-        # First pass: prefer explicit fresher/intern titles, ensuring no senior leak
-        fresher_jobs = [
-            j for j in jobs
-            if any(k in j["title"].lower() for k in fresher_keywords)
-            and get_experience_tag(j["title"]) not in non_fresher_tags
-        ]
-        # Second pass: include generic SWE titles (e.g. "Software Engineer") that
-        # aren't explicitly senior — but only if no fresher-tagged jobs exist
-        generic_ok = [
-            j for j in jobs
-            if get_experience_tag(j["title"]) not in non_fresher_tags
-            and j not in fresher_jobs
-        ]
-        jobs = fresher_jobs if fresher_jobs else generic_ok
-        if not jobs:
-            return []
-
-
-    # Build rich profile text and expand job title abbreviations before embedding
-    profile_text = _build_profile_text(student)
-    job_texts = [
-        f"{_expand_title(j['title'])} at {j['company']} in {j.get('location', '')}".strip()
-        for j in jobs
-    ]
-
-    all_texts = [profile_text] + job_texts
-    embeddings = get_embeddings_from_hf(all_texts)
-
-    if not embeddings or len(embeddings) < 2:
-        # Fallback if API fails
-        scores = [0.3] * len(jobs)
-    else:
-        profile_emb = embeddings[0]
-        job_embs = embeddings[1:]
-        scores = [calculate_cosine_similarity(profile_emb, j_emb) for j_emb in job_embs]
-
-    # Role-match bonus: if the job clearly matches a preferred role, add +0.15
-    for i, job in enumerate(jobs):
-        if matches_role(job["title"], roles):
-            scores[i] = min(1.0, scores[i] + 0.15)
-        # Extra bonus for intern/fresher match when student is a recent grad
-        if grad_year >= current_year - 1 and is_internship(job):
-            scores[i] = min(1.0, scores[i] + 0.05)
-
-    ranked = sorted(zip(jobs, scores), key=lambda x: x[1], reverse=True)
-    results = [(job, score) for job, score in ranked if score >= threshold][:top_n]
-    # Rescale raw cosine (realistic range ~0.25-0.75) to a display-friendly 0-100
-    DISPLAY_FLOOR, DISPLAY_CEIL = 0.25, 0.75
-    rescaled = []
-    for job, score in results:
-        display_score = (score - DISPLAY_FLOOR) / (DISPLAY_CEIL - DISPLAY_FLOOR)
-        display_score = max(0.0, min(1.0, display_score))
-        rescaled.append((job, round(display_score, 4)))
-    return rescaled
-
-
-def build_match_reason(job: dict, student: dict) -> str:
-    """Build a short human-readable explanation of why a job matched."""
-    reasons = []
-    title_lower = job["title"].lower()
-    skills = student.get("skills") or []
-    matched_skills = [s for s in skills if s.lower() in title_lower]
-    if matched_skills:
-        reasons.append(f"Matches your {', '.join(matched_skills[:2])} skills")
-    roles = student.get("preferred_roles") or []
-    for role in roles:
-        keywords = keyword_map.get(role, [])
-        if any(k in title_lower for k in keywords):
-            reasons.append(f"{role.capitalize()} role")
-            break
-    exp_tag = get_experience_tag(job["title"])
-    grad_year = student.get("graduation_year", datetime.now().year)
-    fit = get_graduation_tag(job["title"], grad_year)
-    if "Good" in fit:
-        reasons.append("Fresher-friendly")
-    if not reasons:
-        reasons.append("Matches your profile")
-    return " · ".join(reasons)
 
 def format_job_card(job: dict, grad_year: int = 2026, score: float = 0.0, student: dict = None) -> str:
     """Single place to format a job card — used everywhere"""
@@ -669,7 +422,7 @@ async def update_skills(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def update_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    valid = list(keyword_map.keys())  # backend, frontend, ml, data, devops, fullstack, android, ios
+    valid = list(keyword_map.keys())
     if not context.args:
         await update.message.reply_text(f"Usage: /roles backend, ml\nValid options: {', '.join(valid)}")
         return
