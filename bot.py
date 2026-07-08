@@ -69,15 +69,17 @@ def get_experience_tag(title):
         return "🌱 Fresher / Intern"
     if any(k in t for k in ["director", "vp ", "vice president", "head of", "chief"]):
         return "👑 Director / VP"
-    if any(k in t for k in ["engineering manager", "tech lead", "team lead"]):
+    if any(k in t for k in ["engineering manager", "tech lead", "team lead", "lead engineer", "engineering lead"]):
         return "🏆 Manager / Lead"
     if any(k in t for k in ["principal", "staff", "architect", "sde-3", "sde iii"]):
         return "⚡ Staff / Principal"
     if any(k in t for k in ["senior", "sr.", "sde-2", "sde ii"]):
         return "🚀 Senior (5+ yrs)"
-    if any(k in t for k in ["junior", "jr.", "sde-1", "sde i", "associate engineer"]):
+    if any(k in t for k in ["junior", "jr.", "sde-1", "sde i", "associate"]):
         return "🔵 Junior (0-2 yrs)"
-    return "💼 Mid-level (2-5 yrs)"
+    if any(k in t for k in ["mid-level", "mid level", "experienced"]):
+        return "💼 Mid-level (2-5 yrs)"
+    return "💼 Software Engineer"
 
 def get_graduation_tag(title: str, grad_year: int) -> str:
     current_year = datetime.now().year
@@ -367,7 +369,18 @@ async def get_skills(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ROLES
 
 async def get_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    valid = list(keyword_map.keys())
     roles = [r.strip().lower() for r in update.message.text.split(",")]
+    invalid = [r for r in roles if r not in valid]
+    if invalid:
+        await update.message.reply_text(
+            f"❌ Unknown roles: {', '.join(invalid)}\n\n"
+            f"Please choose from: {', '.join(valid)}\n\n"
+            f"Send comma separated (e.g., *backend, ml*):",
+            parse_mode="Markdown"
+        )
+        return ROLES
+
     context.user_data['preferred_roles'] = roles
     await update.message.reply_text(
         "💼 Are you looking for?\n\n*internship* / *fulltime* / *both*",
@@ -676,6 +689,28 @@ async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_reply_markup(reply_markup=None)  # remove buttons
     await query.message.reply_text(label)
 
+async def checkin_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    _, status = query.data.split(":", 1)
+    chat_id = query.from_user.id
+    try:
+        if status == "active":
+            # Set paused to False to keep alerts on
+            supabase.table("students").update({"paused": False}).eq("chat_id", chat_id).execute()
+            response_text = "🎯 *Awesome!* We'll keep scanning and sending you the best matches."
+        else:
+            # Set paused to True to temporarily pause alerts
+            supabase.table("students").update({"paused": True}).eq("chat_id", chat_id).execute()
+            response_text = "⏸️ *Got it!* Your job alerts are now paused. You can turn them back on anytime by sending /resume."
+        
+        # Remove buttons from the message and reply with confirmation
+        await query.edit_message_reply_markup(reply_markup=None)
+        await query.message.reply_text(response_text, parse_mode="Markdown")
+    except Exception as e:
+        print(f"Check-in callback failed: {e}")
+        await query.message.reply_text("⚠️ Something went wrong saving your response. Send /start to update your profile.")
+
 
 # ── Main ───────────────────────────────────────────────────────────────────
 
@@ -726,6 +761,7 @@ def create_app(token):
     app.add_handler(CommandHandler("pause", pause_alerts))
     app.add_handler(CommandHandler("resume", resume_alerts))
     app.add_handler(CallbackQueryHandler(feedback_handler, pattern="^feedback:"))
+    app.add_handler(CallbackQueryHandler(checkin_callback_handler, pattern="^checkin:"))
     app.job_queue.run_repeating(send_alerts, interval=300, first=10)
 
     return app

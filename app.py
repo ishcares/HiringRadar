@@ -1,8 +1,24 @@
 import os
 import asyncio
+import logging
 from fastapi import FastAPI
 import uvicorn
 from bot import create_app
+
+class HealthCheckFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Prevent logging of HEAD / requests to avoid log spam
+        if record.args and len(record.args) >= 3:
+            method = record.args[1]
+            path = record.args[2]
+            if method == "HEAD" and path == "/":
+                return False
+        
+        # Fallback check on formatted message
+        message = record.getMessage()
+        if "HEAD / " in message:
+            return False
+        return True
 
 app = FastAPI()
 
@@ -40,6 +56,9 @@ async def run_telegram_bot():
 
 @app.on_event("startup")
 async def startup_event():
+    # Filter out HEAD / HTTP/1.1 logs from uvicorn.access
+    logging.getLogger("uvicorn.access").addFilter(HealthCheckFilter())
+
     # Start the Telegram bot in a background task
     asyncio.create_task(run_telegram_bot())
 
