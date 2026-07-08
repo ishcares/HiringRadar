@@ -8,7 +8,7 @@ from telegram.ext import (
     ConversationHandler, CallbackQueryHandler, filters
 )
 import hashlib
-from scraper import get_new_jobs, get_all_jobs, count_subscribers
+from scraper import get_new_jobs, get_all_jobs, count_subscribers, has_student_seen_job, mark_student_seen_jobs, load_seen_jobs, save_seen_jobs
 from datetime import datetime
 from supabase import create_client
 import math
@@ -514,41 +514,64 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ── Alert scheduler ────────────────────────────────────────────────────────
 
 async def send_alerts(context: ContextTypes.DEFAULT_TYPE):
-    new_jobs = await asyncio.to_thread(get_new_jobs)
-    if not new_jobs:
-        return
-    grouped_jobs = group_jobs(new_jobs)
+    # Fetch all currently open jobs
+    all_jobs = await asyncio.to_thread(get_all_jobs)
+    
+    # 1. Identify genuinely brand-new postings for the channel broadcast using seen_jobs
+    seen_urls = await asyncio.to_thread(load_seen_jobs)
+    new_jobs = [job for job in all_jobs if job["url"] not in seen_urls]
+    if new_jobs:
+        new_urls = [job["url"] for job in new_jobs]
+        await asyncio.to_thread(save_seen_jobs, new_urls)
+        grouped_jobs = group_jobs(new_jobs)
 
-    # --- Post to Telegram Channel (if configured) ---
-    CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
-    if CHANNEL_ID:
-        bot_username = context.bot.username
-        for job in grouped_jobs:
-            try:
-                card = format_job_card(job)
-                text_msg = (
-                    f"📢 *New Job Alert!*\n━━━━━━━━━━━━━━━━━━━━━\n\n{card}\n\n"
-                    f"🤖 *[Get Personalized Match Alerts](https://t.me/{bot_username})*"
-                )
-                await context.bot.send_message(
-                    chat_id=CHANNEL_ID,
-                    text=text_msg,
-                    parse_mode="Markdown",
-                    disable_web_page_preview=True
-                )
-                await asyncio.sleep(1)  # rate limit buffer
-            except Exception as e:
-                print(f"Failed to post to channel {CHANNEL_ID}: {e}")
+        # --- Post to Telegram Channel (if configured) ---
+        CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
+        if CHANNEL_ID:
+            bot_username = context.bot.username
+            for job in grouped_jobs:
+                try:
+                    card = format_job_card(job)
+                    text_msg = (
+                        f"📢 *New Job Alert!*\n━━━━━━━━━━━━━━━━━━━━━\n\n{card}\n\n"
+                        f"🤖 *[Get Personalized Match Alerts](https://t.me/{bot_username})*"
+                    )
+                    await context.bot.send_message(
+                        chat_id=CHANNEL_ID,
+                        text=text_msg,
+                        parse_mode="Markdown",
+                        disable_web_page_preview=True
+                    )
+                    await asyncio.sleep(1)  # rate limit buffer
+                except Exception as e:
+                    print(f"Failed to post to channel {CHANNEL_ID}: {e}")
 
+    # 2. Match all open jobs against students, checking per-student sent history
     students = supabase.table("students").select("*").execute().data
+    if not students:
+        return
+
+    grouped_all_jobs = group_jobs(all_jobs)
 
     for student in students:
         if student.get("paused"):   # skip users who paused alerts
             continue
-        matched = match_jobs_for_student(student, grouped_jobs)
+        matched = match_jobs_for_student(student, grouped_all_jobs)
         send_pairs = matched if matched else []
         if not send_pairs:
             continue
+
+        # Filter out jobs that the student has already seen
+        filtered_send_pairs = []
+        for job, score in send_pairs:
+            seen = await asyncio.to_thread(has_student_seen_job, student["chat_id"], job["url"])
+            if not seen:
+                filtered_send_pairs.append((job, score))
+        send_pairs = filtered_send_pairs
+
+        if not send_pairs:
+            continue
+
         grad_year = student.get("graduation_year", 2026)
         job_lines = [format_job_card(job, grad_year, score, student) for job, score in send_pairs]
 
@@ -591,6 +614,11 @@ async def send_alerts(context: ContextTypes.DEFAULT_TYPE):
                     reply_markup=keyboard
                 )
                 await asyncio.sleep(0.1)
+
+            # Successfully sent all chunks: mark these jobs as seen by the student!
+            sent_urls = [job["url"] for job, _ in send_pairs]
+            await asyncio.to_thread(mark_student_seen_jobs, student["chat_id"], sent_urls)
+
         except Forbidden:
             supabase.table("students").delete().eq("chat_id", student['chat_id']).execute()
         except RetryAfter as e:
@@ -620,6 +648,11 @@ async def send_alerts(context: ContextTypes.DEFAULT_TYPE):
                         reply_markup=keyboard
                     )
                     await asyncio.sleep(0.1)
+                
+                # Successfully sent all chunks on retry: mark these jobs as seen by the student!
+                sent_urls = [job["url"] for job, _ in send_pairs]
+                await asyncio.to_thread(mark_student_seen_jobs, student["chat_id"], sent_urls)
+
             except Exception as retry_err:
                 print(f"Failed to send to {student['chat_id']} after retry: {retry_err}")
         except Exception as e:

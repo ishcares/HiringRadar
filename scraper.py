@@ -369,3 +369,49 @@ def remove_subscriber(chat_id):
     conn.commit()
     cur.close()
     conn.close()
+
+def has_student_seen_job(chat_id, job_url):
+    import hashlib
+    job_url_hash = hashlib.md5(job_url.encode()).hexdigest()[:10]
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS sent_jobs (
+            chat_id BIGINT,
+            job_url_hash TEXT,
+            sent_at TIMESTAMP DEFAULT now(),
+            PRIMARY KEY (chat_id, job_url_hash)
+        )
+    """)
+    cur.execute(
+        "SELECT 1 FROM sent_jobs WHERE chat_id = %s AND job_url_hash = %s",
+        (chat_id, job_url_hash)
+    )
+    seen = cur.fetchone() is not None
+    cur.close()
+    conn.close()
+    return seen
+
+def mark_student_seen_jobs(chat_id, job_urls):
+    if not job_urls:
+        return
+    import hashlib
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS sent_jobs (
+            chat_id BIGINT,
+            job_url_hash TEXT,
+            sent_at TIMESTAMP DEFAULT now(),
+            PRIMARY KEY (chat_id, job_url_hash)
+        )
+    """)
+    for url in job_urls:
+        job_url_hash = hashlib.md5(url.encode()).hexdigest()[:10]
+        cur.execute(
+            "INSERT INTO sent_jobs (chat_id, job_url_hash) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            (chat_id, job_url_hash)
+        )
+    conn.commit()
+    cur.close()
+    conn.close()
