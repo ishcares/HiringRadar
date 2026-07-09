@@ -637,6 +637,46 @@ async def resume_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     supabase.table("students").update({"paused": False}).eq("chat_id", chat_id).execute()
     await update.message.reply_text("▶️ Alerts resumed! You'll get the next batch soon.")
 
+async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Admin-only broadcast command to update all active students."""
+    sender_chat_id = update.effective_chat.id
+    admin_id_str = os.getenv("ADMIN_CHAT_ID")
+    
+    if not admin_id_str or str(sender_chat_id) != admin_id_str.strip():
+        await update.message.reply_text("❌ Unauthorized. Admin command only.")
+        return
+
+    if not context.args:
+        await update.message.reply_text("Usage: `/broadcast Your message here...`", parse_mode="Markdown")
+        return
+
+    message_text = " ".join(context.args)
+    # Get all non-paused students
+    students = supabase.table("students").select("chat_id").eq("paused", False).execute().data
+    if not students:
+        await update.message.reply_text("No active users to broadcast to.")
+        return
+
+    await update.message.reply_text(f"📣 Starting broadcast to {len(students)} users...")
+    
+    success_count = 0
+    fail_count = 0
+    for s in students:
+        try:
+            await context.bot.send_message(
+                chat_id=s["chat_id"],
+                text=message_text,
+                parse_mode="Markdown",
+                disable_web_page_preview=True
+            )
+            success_count += 1
+            await asyncio.sleep(0.05) # Rate limit buffer
+        except Exception as e:
+            fail_count += 1
+            print(f"[broadcast] Failed to send to {s['chat_id']}: {e}")
+
+    await update.message.reply_text(f"✅ Broadcast finished.\nSent: {success_count}\nFailed: {fail_count}")
+
 
 async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -721,6 +761,7 @@ def create_app(token):
     app.add_handler(conv_handler)
     app.add_handler(CommandHandler("profile", profile))
     app.add_handler(CommandHandler("share", share))
+    app.add_handler(CommandHandler("broadcast", broadcast))
     app.add_handler(CommandHandler("jobs", jobs))
     app.add_handler(CommandHandler("stats", stats))
     app.add_handler(CommandHandler("skills", update_skills))
