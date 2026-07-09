@@ -19,6 +19,10 @@ from db import (
     upsert_jobs_cache,
     get_cached_jobs,
     deactivate_stale_jobs,
+    ensure_referral_code,
+    record_referral,
+    get_referral_stats,
+    is_student_premium,
 )
 from datetime import datetime
 from dotenv import load_dotenv
@@ -59,24 +63,36 @@ def format_job_card(job: dict, grad_year: int = 2026, score: float = 0.0, studen
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     res = supabase.table("students").select("*").eq("chat_id", chat_id).execute()
+    
+    # Check if this is a new signup via referral deep link
+    referrer_code = None
+    if context.args and context.args[0].startswith("ref_"):
+        referrer_code = context.args[0].replace("ref_", "").strip()
+
     if res.data:
         student = res.data[0]
         paused_status = "⏸️ Paused" if student.get("paused") else "🟢 Active"
+        # Make sure they have a referral code
+        code = await asyncio.to_thread(ensure_referral_code, chat_id)
         await update.message.reply_text(
             f"👋 Welcome back, *{student['name']}*!\n\n"
             f"🔔 Alerts: {paused_status}\n\n"
             f"━━━━━━━━━━━━━━━━━━━━━\n"
             f"📦 *What can I do?*\n"
             f"/jobs — see your latest matches\n"
-            f"/profile — view \u0026 update your profile\n"
+            f"/profile — view & update profile\n"
             f"/skills Python, ML — update skills\n"
             f"/roles backend, ml — update roles\n"
             f"/experience internship — update job type\n"
+            f"/share — get free premium alerts 🎁\n"
             f"/pause · /resume — toggle alerts\n"
             f"/stats — see active users",
             parse_mode="Markdown"
         )
         return ConversationHandler.END
+
+    # Initialize user_data and save referrer if present
+    context.user_data['referred_by_code'] = referrer_code
 
     await update.message.reply_text(
         "👋 Welcome to *HiringRadar!*\n\n"
@@ -160,6 +176,9 @@ async def get_job_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = context.user_data
     chat_id = update.effective_chat.id
 
+    # Generate their own referral code deterministically
+    referral_code = await asyncio.to_thread(ensure_referral_code, chat_id)
+
     try:
         supabase.table("students").upsert({
             "chat_id": chat_id,
@@ -169,7 +188,29 @@ async def get_job_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "skills": data['skills'],
             "preferred_roles": data['preferred_roles'],
             "job_type": data['job_type'],
+            "referral_code": referral_code,
         }).execute()
+
+        # If referred by someone, record it and potentially reward the referrer
+        referred_by_code = data.get("referred_by_code")
+        if referred_by_code:
+            upgraded = await asyncio.to_thread(record_referral, chat_id, referred_by_code)
+            if upgraded:
+                # Notify the referrer that they got premium!
+                try:
+                    ref_res = supabase.table("students").select("chat_id, name").eq("referral_code", referred_by_code).execute()
+                    if ref_res.data:
+                        ref_user = ref_res.data[0]
+                        await context.bot.send_message(
+                            chat_id=ref_user["chat_id"],
+                            text=f"🎁 *Premium Unlocked!*\n\n"
+                                 f"3 friends joined using your link! You have been upgraded to "
+                                 f"*HiringRadar Premium* for 7 days. Instant alerts are now active! ⚡",
+                            parse_mode="Markdown"
+                        )
+                except Exception as notify_err:
+                    print(f"Failed to notify referrer: {notify_err}")
+
     except Exception as e:
         print(f"Supabase upsert failed: {e}")
         await update.message.reply_text("⚠️ Couldn't save profile right now. Try /start again.")
@@ -358,31 +399,55 @@ async def scrape_job(context: ContextTypes.DEFAULT_TYPE):
 
 async def alert_job(context: ContextTypes.DEFAULT_TYPE):
     """Consumer: match cached jobs to students and deliver Telegram alerts."""
-
-    # Fast DB read — no HTTP scraping
-    all_jobs = await asyncio.to_thread(get_cached_jobs)
-    if not all_jobs:
-        print("[alert_job] jobs_cache is empty — scrape_job may not have run yet")
-        return
-
-    grouped_all_jobs = group_jobs(all_jobs)
-
     # Get all non-paused students
     students = supabase.table("students").select("*").eq("paused", False).execute().data
     if not students:
         return
 
-    print(f"[alert_job] Matching {len(grouped_all_jobs)} jobs against {len(students)} students")
-
+    # To optimize, we split students into premium vs free, and fetch jobs accordingly
+    premium_student_ids = []
+    free_student_ids = []
+    
+    student_map = {}
     for student in students:
-        matched = match_jobs_for_student(student, grouped_all_jobs)
+        chat_id = student["chat_id"]
+        student_map[chat_id] = student
+        is_premium = await asyncio.to_thread(is_student_premium, chat_id)
+        if is_premium:
+            premium_student_ids.append(chat_id)
+        else:
+            free_student_ids.append(chat_id)
+
+    # Fetch jobs for both tiers
+    instant_jobs = []
+    delayed_jobs = []
+    
+    if premium_student_ids:
+        instant_jobs = await asyncio.to_thread(get_cached_jobs, delay_hours=0)
+    if free_student_ids:
+        delayed_jobs = await asyncio.to_thread(get_cached_jobs, delay_hours=2)
+
+    # Group jobs
+    grouped_instant = group_jobs(instant_jobs) if instant_jobs else []
+    grouped_delayed = group_jobs(delayed_jobs) if delayed_jobs else []
+
+    print(f"[alert_job] Matching: Premium users count={len(premium_student_ids)}, Free users count={len(free_student_ids)}")
+
+    for chat_id, student in student_map.items():
+        is_premium = chat_id in premium_student_ids
+        job_pool = grouped_instant if is_premium else grouped_delayed
+        
+        if not job_pool:
+            continue
+
+        matched = match_jobs_for_student(student, job_pool)
         if not matched:
             continue
 
         # Filter out jobs this student has already seen
         unseen = []
         for job, score in matched:
-            seen = await asyncio.to_thread(has_student_seen_job, student["chat_id"], job["url"])
+            seen = await asyncio.to_thread(has_student_seen_job, chat_id, job["url"])
             if not seen:
                 unseen.append((job, score))
 
@@ -466,13 +531,65 @@ async def alert_job(context: ContextTypes.DEFAULT_TYPE):
                     await asyncio.sleep(0.1)
                 
                 # Successfully sent all chunks on retry: mark these jobs as seen by the student!
-                sent_urls = [job["url"] for job, _ in send_pairs]
+                sent_urls = [job["url"] for job, _ in chunk_pairs]
                 await asyncio.to_thread(mark_student_seen_jobs, student["chat_id"], sent_urls)
 
             except Exception as retry_err:
                 print(f"Failed to send to {student['chat_id']} after retry: {retry_err}")
         except Exception as e:
             print(f"Failed to send to {student['chat_id']}: {e}")
+
+async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    res = supabase.table("students").select("*").eq("chat_id", chat_id).execute()
+    if not res.data:
+        await update.message.reply_text("No profile found. Type /start to set one up.")
+        return
+    s = res.data[0]
+    paused_status = "⏸️ Paused" if s.get("paused") else "🟢 Active"
+    
+    # Check premium status
+    premium_active = is_student_premium(chat_id)
+    tier_label = "⚡ Premium Tier" if premium_active else "🟢 Free Tier (2hr delay)"
+
+    await update.message.reply_text(
+        f"👤 *Your Profile*\n\n"
+        f"🙋 Name: {s['name']}\n"
+        f"🎓 Branch: {s['branch']} | {s['graduation_year']}\n"
+        f"💻 Skills: {', '.join(s['skills'] or [])}\n"
+        f"🎯 Roles: {', '.join(s['preferred_roles'] or [])}\n"
+        f"💼 Job type: {s['job_type']}\n"
+        f"👑 Account: *{tier_label}*\n"
+        f"🔔 Alerts: {paused_status}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━\n"
+        f"✏️ *Update your profile:*\n"
+        f"`/skills` Python, ML, SQL\n"
+        f"`/roles` backend, ml\n"
+        f"`/experience` internship\n"
+        f"`/share` · get free premium\n"
+        f"`/pause` · `/resume` alerts",
+        parse_mode="Markdown"
+    )
+
+async def share(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    bot_username = context.bot.username
+    stats = await asyncio.to_thread(get_referral_stats, chat_id)
+    
+    ref_link = f"https://t.me/{bot_username}?start=ref_{stats['code']}"
+    premium_status = "⚡ *Premium Active*" if stats['is_premium'] else "🟢 *Free Tier*"
+
+    await update.message.reply_text(
+        f"🎁 *HiringRadar Referral Program*\n━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"Get friends to join and unlock *Premium Alerts* (Instant alerts instead of 2-hour delay)!\n\n"
+        f"Invite *3 friends* → Get *7 days of Premium* free.\n\n"
+        f"👤 Status: {premium_status}\n"
+        f"👥 Successful Invites: *{stats['count']}*\n\n"
+        f"🔗 *Your Invite Link:*\n{ref_link}\n\n"
+        f"Copy and forward the link above to your college groups! 🚀",
+        parse_mode="Markdown",
+        disable_web_page_preview=True
+    )
 
 async def update_skills(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -568,6 +685,7 @@ async def on_startup(app):
     await app.bot.set_my_commands([
         BotCommand("jobs",       "See your latest job matches"),
         BotCommand("profile",    "View and update your profile"),
+        BotCommand("share",      "Invite friends & get Premium Alerts 🎁"),
         BotCommand("skills",     "Update your skills"),
         BotCommand("roles",      "Update preferred roles"),
         BotCommand("experience", "Update job type preference"),
@@ -602,6 +720,7 @@ def create_app(token):
 
     app.add_handler(conv_handler)
     app.add_handler(CommandHandler("profile", profile))
+    app.add_handler(CommandHandler("share", share))
     app.add_handler(CommandHandler("jobs", jobs))
     app.add_handler(CommandHandler("stats", stats))
     app.add_handler(CommandHandler("skills", update_skills))

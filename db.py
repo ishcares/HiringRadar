@@ -132,6 +132,114 @@ def count_subscribers() -> int:
 
 
 # ---------------------------------------------------------------------------
+# referral + premium — viral growth system
+#
+# HOW IT WORKS:
+#   1. Every student gets a unique 8-char referral_code when they sign up.
+#   2. /share gives them: t.me/Bot?start=ref_<code>
+#   3. When someone joins via that link, we store referred_by = their code.
+#   4. When referrer hits 3 successful referrals → auto-upgrade to premium 7 days.
+#   5. Premium users: instant alerts. Free users: 2-hour delayed alerts.
+# ---------------------------------------------------------------------------
+
+def generate_referral_code(chat_id: int) -> str:
+    """
+    Deterministic 8-char code from chat_id.
+    Same chat_id always produces same code — safe to call repeatedly.
+    """
+    return hashlib.md5(str(chat_id).encode()).hexdigest()[:8]
+
+
+def ensure_referral_code(chat_id: int) -> str:
+    """
+    Make sure a student has a referral_code. Creates one if missing.
+    Returns the code.
+    """
+    code = generate_referral_code(chat_id)
+    try:
+        supabase.table("students").update({"referral_code": code}).eq("chat_id", chat_id).is_("referral_code", "null").execute()
+    except Exception as e:
+        logger.error("ensure_referral_code failed: %s", e)
+    return code
+
+
+def record_referral(new_chat_id: int, referrer_code: str) -> bool:
+    """
+    Called when a new user joins via a referral link.
+    Stores who referred them, then checks if referrer earned premium.
+    Returns True if referrer was upgraded to premium.
+    """
+    try:
+        # Store the referral on the new user's profile
+        supabase.table("students").update({"referred_by": referrer_code}).eq("chat_id", new_chat_id).execute()
+
+        # Count how many people the referrer has successfully brought in
+        count_res = (
+            supabase.table("students")
+            .select("chat_id", count="exact")
+            .eq("referred_by", referrer_code)
+            .execute()
+        )
+        referral_count = count_res.count or 0
+
+        # Every 3 referrals → 7 days of premium
+        if referral_count % 3 == 0:
+            from datetime import datetime, timezone, timedelta
+            premium_until = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+            supabase.table("students").update({
+                "is_premium": True,
+                "premium_until": premium_until,
+            }).eq("referral_code", referrer_code).execute()
+            logger.info("Upgraded referrer %s to premium (7 days)", referrer_code)
+            return True
+    except Exception as e:
+        logger.error("record_referral failed: %s", e)
+    return False
+
+
+def get_referral_stats(chat_id: int) -> dict:
+    """Return referral code and how many people have joined via it."""
+    try:
+        res = supabase.table("students").select("referral_code, is_premium, premium_until").eq("chat_id", chat_id).execute()
+        if not res.data:
+            return {"code": None, "count": 0, "is_premium": False}
+        row = res.data[0]
+        code = row.get("referral_code") or ensure_referral_code(chat_id)
+        count_res = supabase.table("students").select("chat_id", count="exact").eq("referred_by", code).execute()
+        return {
+            "code": code,
+            "count": count_res.count or 0,
+            "is_premium": row.get("is_premium", False),
+            "premium_until": row.get("premium_until"),
+        }
+    except Exception as e:
+        logger.error("get_referral_stats failed: %s", e)
+        return {"code": None, "count": 0, "is_premium": False}
+
+
+def is_student_premium(chat_id: int) -> bool:
+    """
+    Check if a student has active premium.
+    Handles expiry: if premium_until is in the past, treats as free.
+    """
+    try:
+        from datetime import datetime, timezone
+        res = supabase.table("students").select("is_premium, premium_until").eq("chat_id", chat_id).execute()
+        if not res.data:
+            return False
+        row = res.data[0]
+        if not row.get("is_premium"):
+            return False
+        premium_until = row.get("premium_until")
+        if premium_until is None:
+            return True  # no expiry = lifetime
+        return datetime.fromisoformat(premium_until) > datetime.now(timezone.utc)
+    except Exception as e:
+        logger.error("is_student_premium failed: %s", e)
+        return False
+
+
+# ---------------------------------------------------------------------------
 # jobs_cache — decoupled scrape / alert architecture
 #
 # WHY THIS EXISTS:
@@ -186,24 +294,39 @@ def upsert_jobs_cache(jobs: list[dict]) -> int:
         return 0
 
 
-def get_cached_jobs() -> list[dict]:
+def get_cached_jobs(delay_hours: int = 0) -> list[dict]:
     """
     Read all currently active jobs from the cache.
-
-    Called by the alert job — returns instantly from DB,
-    no HTTP scraping involved.
+    If delay_hours is specified, only returns jobs scraped at least delay_hours ago.
     """
     try:
-        res = (
-            supabase.table("jobs_cache")
-            .select("company, title, location, url")
-            .eq("is_active", True)
-            .execute()
-        )
-        return res.data or []
+        query = supabase.table("jobs_cache").select("company, title, location, url, scraped_at").eq("is_active", True)
+        res = query.execute()
+        jobs = res.data or []
+        if delay_hours > 0:
+            from datetime import datetime, timezone, timedelta
+            cutoff = datetime.now(timezone.utc) - timedelta(hours=delay_hours)
+            filtered = []
+            for j in jobs:
+                # Supabase returns ISO timestamps, parse them
+                scraped_at_str = j.get("scraped_at")
+                if scraped_at_str:
+                    try:
+                        # Convert Z to +00:00 if needed for ISO parser compatibility
+                        t_str = scraped_at_str.replace("Z", "+00:00")
+                        t_val = datetime.fromisoformat(t_str)
+                        if t_val <= cutoff:
+                            filtered.append(j)
+                    except ValueError:
+                        filtered.append(j) # Fallback if parsing fails
+                else:
+                    filtered.append(j)
+            return filtered
+        return jobs
     except Exception as e:
         logger.error("get_cached_jobs failed: %s", e)
         return []
+
 
 
 def deactivate_stale_jobs(live_job_ids: set[str]) -> int:
