@@ -1,7 +1,25 @@
+import logging
+import os
 import re
 from datetime import datetime
+from functools import lru_cache
 
 from embeddings import calculate_cosine_similarity, get_embeddings_from_hf
+
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Tuning knobs — override via env vars without redeploying
+# ---------------------------------------------------------------------------
+MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.25"))
+ROLE_BONUS      = float(os.getenv("ROLE_BONUS",      "0.15"))
+INTERN_BONUS    = float(os.getenv("INTERN_BONUS",    "0.05"))
+
+# ---------------------------------------------------------------------------
+# In-process embedding cache — keyed on (title, company) tuple
+# Avoids re-embedding the same job titles on every 5-min alert cycle.
+# ---------------------------------------------------------------------------
+_EMBED_CACHE: dict[tuple, list[float]] = {}
 
 
 keyword_map = {
@@ -9,7 +27,11 @@ keyword_map = {
     "frontend":  ["frontend", "react", "vue", "angular", "ui", "javascript", "css"],
     "ml":        ["machine learning", "ml", "ai", "deep learning", "nlp", "data science"],
     "data":      ["data engineer", "data analyst", "analytics", "sql", "etl"],
-    "devops":    ["devops", "sre", "cloud", "kubernetes", "docker", "infrastructure"],
+    "devops":    [
+        "devops", "sre", "site reliability", "kubernetes", "docker",
+        "infrastructure", "platform engineer", "devsecops", "helm",
+        "terraform", "ci/cd", "gitops",
+    ],
     "fullstack": ["fullstack", "full stack", "full-stack"],
     "android":   ["android", "kotlin"],
     "ios":       ["ios", "swift"],
@@ -160,30 +182,75 @@ def _filter_fresher_jobs(jobs: list, grad_year: int, current_year: int) -> list:
     return fresher_jobs if fresher_jobs else generic_ok
 
 
+def _keyword_fallback_scores(jobs: list, roles: list, grad_year: int, current_year: int) -> list[float]:
+    """Keyword-only scorer used when the HF API is unavailable.
+
+    Scores are deterministic and based purely on hard signals:
+    - Role keyword match  → +ROLE_BONUS
+    - Internship match    → +INTERN_BONUS
+    Base score is 0.0, so nothing crosses threshold unless it keyword-matches.
+    """
+    scores = []
+    for job in jobs:
+        score = 0.0
+        if matches_role(job["title"], roles):
+            score += ROLE_BONUS
+        if grad_year >= current_year - 1 and is_internship(job):
+            score += INTERN_BONUS
+        scores.append(score)
+    return scores
+
+
 def _score_jobs(jobs: list, student: dict, roles: list, embed_fn) -> list[float]:
-    """Return raw cosine scores (+ bonuses) for each job."""
+    """Return raw cosine scores (+ bonuses) for each job.
+
+    Uses an in-process cache so identical job texts are never re-embedded
+    within the same process lifetime.
+    """
     current_year = datetime.now().year
     grad_year = student.get("graduation_year", current_year)
 
     profile_text = _build_profile_text(student)
-    job_texts = [
-        f"{_expand_title(j['title'])} at {j['company']} in {j.get('location', '')}".strip()
-        for j in jobs
-    ]
 
-    embeddings = embed_fn([profile_text] + job_texts)
-    if not embeddings or len(embeddings) < 2:
-        return [0.3] * len(jobs)
+    # Build job texts, pulling from cache where possible
+    job_texts: list[str] = []
+    cache_keys: list[tuple] = []
+    for j in jobs:
+        key = (j["title"], j.get("company", ""))
+        text = f"{_expand_title(j['title'])} at {j.get('company', '')} in {j.get('location', '')}".strip()
+        job_texts.append(text)
+        cache_keys.append(key)
 
-    profile_emb = embeddings[0]
-    job_embs = embeddings[1:]
+    # Determine which job texts need fresh embeddings
+    missing_indices = [i for i, k in enumerate(cache_keys) if k not in _EMBED_CACHE]
+    texts_to_embed = [profile_text] + [job_texts[i] for i in missing_indices]
+
+    fresh_embeddings = embed_fn(texts_to_embed)
+
+    if not fresh_embeddings or len(fresh_embeddings) < 2:
+        logger.warning(
+            "HF embedding API unavailable or returned insufficient data. "
+            "Falling back to keyword-only scoring — match percentages will not be shown."
+        )
+        return _keyword_fallback_scores(jobs, roles, grad_year, current_year)
+
+    profile_emb = fresh_embeddings[0]
+    fresh_job_embs = fresh_embeddings[1:]
+
+    # Populate cache with newly fetched embeddings
+    for idx, emb in zip(missing_indices, fresh_job_embs):
+        _EMBED_CACHE[cache_keys[idx]] = emb
+
+    # Assemble final embedding list from cache
+    job_embs = [_EMBED_CACHE[k] for k in cache_keys]
+
     scores = [calculate_cosine_similarity(profile_emb, j_emb) for j_emb in job_embs]
 
     for i, job in enumerate(jobs):
         if matches_role(job["title"], roles):
-            scores[i] = min(1.0, scores[i] + 0.15)
+            scores[i] = min(1.0, scores[i] + ROLE_BONUS)
         if grad_year >= current_year - 1 and is_internship(job):
-            scores[i] = min(1.0, scores[i] + 0.05)
+            scores[i] = min(1.0, scores[i] + INTERN_BONUS)
 
     return scores
 
@@ -199,7 +266,7 @@ def match_jobs_for_student(
     student: dict,
     jobs: list,
     top_n: int = 10,
-    threshold: float = 0.25,
+    threshold: float = MATCH_THRESHOLD,
     embed_fn=get_embeddings_from_hf,
 ):
     jobs = filter_by_job_type(jobs, student.get("job_type", "both"))

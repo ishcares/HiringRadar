@@ -12,6 +12,9 @@ import pytest
 
 from embeddings import calculate_cosine_similarity
 from matching import (
+    MATCH_THRESHOLD,
+    ROLE_BONUS,
+    INTERN_BONUS,
     build_match_reason,
     filter_by_job_type,
     get_experience_tag,
@@ -20,6 +23,7 @@ from matching import (
     match_jobs_for_student,
     matches_role,
     _filter_fresher_jobs,
+    _keyword_fallback_scores,
     _score_jobs,
 )
 
@@ -131,16 +135,35 @@ class TestScoring:
         scores_no_bonus = _score_jobs([backend_job], student, ["ml"], _mock_embed_fn)
         assert scores_with_bonus[0] > scores_no_bonus[0]
 
-    def test_hf_fallback_returns_default_scores(self, sample_jobs):
+    def test_hf_fallback_uses_keyword_only_not_silent_pass(self, sample_jobs):
+        """When HF API fails, jobs should be scored by keywords only —
+        NOT silently assigned 0.3 which would pass threshold for everything.
+        A job that does NOT match the role keywords must score 0.0.
+        """
         student = {
             "graduation_year": 2026,
             "skills": ["Python"],
             "preferred_roles": ["backend"],
             "job_type": "both",
         }
-        job = sample_jobs[1]
-        scores = _score_jobs([job], student, ["backend"], lambda texts: [])
-        assert scores == [0.3]
+        # ML Engineer job — does NOT match backend role keywords
+        ml_job = next(j for j in sample_jobs if "Machine Learning" in j["title"])
+        scores = _keyword_fallback_scores([ml_job], ["backend"], 2026, 2026)
+        assert scores[0] == 0.0, "Non-matching job must not silently pass threshold"
+
+        # Backend Engineer job — DOES match backend keywords
+        backend_job = next(j for j in sample_jobs if j["title"] == "Backend Engineer")
+        scores = _keyword_fallback_scores([backend_job], ["backend"], 2026, 2026)
+        assert scores[0] == ROLE_BONUS, "Role-matching job should get ROLE_BONUS"
+
+        # Full end-to-end: empty embed_fn triggers fallback, results are filtered
+        matched = match_jobs_for_student(
+            student, sample_jobs, embed_fn=lambda texts: []
+        )
+        matched_titles = [j["title"] for j, _ in matched]
+        assert "Machine Learning Engineer" not in matched_titles, (
+            "ML jobs must NOT appear for backend student in fallback mode"
+        )
 
 
 # ── End-to-end match (mocked embeddings) ─────────────────────────────────────
@@ -182,6 +205,43 @@ class TestMatchJobsForStudent:
         # Only iOS job in fixtures
         matched = match_jobs_for_student(student, sample_jobs, embed_fn=_mock_embed_fn)
         assert len(matched) <= 1
+
+    def test_frontend_intern_persona_matches(self, sample_jobs):
+        """Persona 3: frontend + internship. Fixtures now include a
+        'Frontend Engineer Intern' entry, so this persona must get ≥1 match.
+        """
+        student = {
+            "name": "2027 Frontend Intern",
+            "graduation_year": 2027,
+            "skills": ["React", "JavaScript"],
+            "preferred_roles": ["frontend"],
+            "job_type": "internship",
+        }
+        matched = match_jobs_for_student(student, sample_jobs, embed_fn=_mock_embed_fn)
+        assert len(matched) >= 1, "Frontend intern persona must match ≥1 job with fixture data"
+        titles = [j["title"] for j, _ in matched]
+        assert any("Frontend" in t for t in titles)
+
+    def test_env_threshold_is_respected(self, sample_jobs):
+        """Passing an explicit threshold to match_jobs_for_student overrides the env default."""
+        student = {
+            "graduation_year": 2026,
+            "skills": ["Python"],
+            "preferred_roles": ["backend"],
+            "job_type": "both",
+        }
+
+        def low_embed(texts):
+            # All jobs get cosine ~ 0; with ROLE_BONUS = 0.15 they just barely miss 0.25
+            return [[1, 0, 0]] + [[0, 1, 0]] * (len(texts) - 1)
+
+        # At default threshold (0.25) backend jobs score 0+0.15 = 0.15 → no match
+        no_match = match_jobs_for_student(student, sample_jobs, threshold=0.25, embed_fn=low_embed)
+        assert len(no_match) == 0
+
+        # At lowered threshold (0.10) the same jobs score 0.15 → match
+        with_match = match_jobs_for_student(student, sample_jobs, threshold=0.10, embed_fn=low_embed)
+        assert len(with_match) > 0
 
 
 # ── Utilities ────────────────────────────────────────────────────────────────

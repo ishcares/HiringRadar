@@ -1,10 +1,16 @@
+import logging
 import os
 import requests
-import psycopg2
 
-def get_db_connection():
-    url = os.getenv("DATABASE_URL")
-    return psycopg2.connect(url)
+from db import (
+    load_seen_jobs,
+    save_seen_jobs,
+    has_student_seen_job,
+    mark_student_seen_jobs,
+    count_subscribers,
+)
+
+logger = logging.getLogger(__name__)
 
 def is_india_location(location: str) -> bool:
     if not location:
@@ -149,6 +155,71 @@ def scrape_workday(company_name, tenant, job_board, wd_num=1):
     return relevant
 
 
+def scrape_smartrecruiters(company_name: str, company_id: str):
+    """
+    Scrape jobs from SmartRecruiters public postings API.
+    company_id : exact company identifier as it appears in SmartRecruiters URLs,
+                 e.g. 'Freshworks', 'BrowserStack', 'Swiggy'
+    API docs   : https://dev.smartrecruiters.com/customer-api/posting-api/
+    """
+    base_url = f"https://api.smartrecruiters.com/v1/companies/{company_id}/postings"
+    relevant = []
+    offset, limit = 0, 100
+
+    while True:
+        try:
+            resp = requests.get(
+                base_url,
+                params={"limit": limit, "offset": offset},
+                timeout=15,
+            )
+        except Exception as e:
+            print(f"Failed to fetch {company_name} (SmartRecruiters): {e}")
+            break
+
+        if resp.status_code != 200:
+            print(f"Failed to fetch {company_name} (SmartRecruiters): HTTP {resp.status_code}")
+            break
+
+        data = resp.json()
+        postings = data.get("content", [])
+        if not postings:
+            break
+
+        for job in postings:
+            title = job.get("name", "")
+            if not is_relevant(title):
+                continue
+
+            # Location — SmartRecruiters nests it under job.location
+            loc = job.get("location", {})
+            location = ", ".join(filter(None, [
+                loc.get("city", ""),
+                loc.get("country", ""),
+                "Remote" if job.get("location", {}).get("remote") else "",
+            ])) or "Not specified"
+            if not is_india_location(location):
+                continue
+
+            job_id = job.get("id", "")
+            job_url = (
+                f"https://jobs.smartrecruiters.com/{company_id}/{job_id}"
+            )
+            relevant.append({
+                "company": company_name,
+                "title": title,
+                "location": location,
+                "url": job_url,
+            })
+
+        # Paginate until exhausted
+        if len(postings) < limit:
+            break
+        offset += limit
+
+    return relevant
+
+
 def scrape_greenhouse_json(company_name, board_token):
     url = f"https://boards-api.greenhouse.io/v1/boards/{board_token}/jobs"
     for attempt in range(2):
@@ -263,7 +334,6 @@ def get_all_jobs():
     for name, slug in [
         ("CRED", "cred"),
         ("Meesho", "meesho"),
-        
         ("Paytm", "paytm"),
         ("Hevo Data", "hevodata"),
         ("Stable Money", "stable-money1"),
@@ -271,9 +341,8 @@ def get_all_jobs():
         ("Sprinto", "Sprinto"),
         ("Mindtickle", "mindtickle"),
         ("fi.money", "epifi"),
-        ("FamPay", "fampay"),          # ✅ fintech for students, hires interns
+        ("FamPay", "fampay"),          # fintech for students, hires interns
         ("JumpCloud", "jumpcloud"),
-        
     ]:
         try:
             all_jobs += scrape_lever(name, slug)
@@ -283,38 +352,33 @@ def get_all_jobs():
     # ── Workday (plain HTTP — no session needed) ───────────────────────────────
     # HTTP 200 = works | HTTP 422 = wrong board slug | Cloudflare = use playwright
     for name, tenant, board, wd in [
-        ("Salesforce", "salesforce", "External_Career_Site", 12),  # ✅ verified
+        ("Salesforce", "salesforce", "External_Career_Site", 12),  # verified
     ]:
         try:
             all_jobs += scrape_workday(name, tenant, board, wd)
         except Exception as e:
             print(f"Error scraping Workday for {name}: {e}")
 
+    # ── SmartRecruiters (public postings API) ──────────────────────────────────
+    # Verified via api.smartrecruiters.com/v1/companies/{id}/postings
+    for name, company_id in [
+        ("Freshworks",   "Freshworks"),    # 114 jobs verified — CRM/SaaS, India HQ
+        ("Swiggy",       "Swiggy"),        # 2 jobs verified — food delivery, India HQ
+        ("BrowserStack", "BrowserStack"),  # board exists — testing platform, India HQ
+        ("Chargebee",    "Chargebee"),     # board exists — billing SaaS, India team
+    ]:
+        try:
+            all_jobs += scrape_smartrecruiters(name, company_id)
+        except Exception as e:
+            print(f"Error scraping SmartRecruiters for {name}: {e}")
+
     return all_jobs
 
 
 
 
-def load_seen_jobs():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("CREATE TABLE IF NOT EXISTS seen_jobs (url TEXT PRIMARY KEY)")
-    cur.execute("SELECT url FROM seen_jobs")
-    urls = set(row[0] for row in cur.fetchall())
-    cur.close()
-    conn.close()
-    return urls
 
-def save_seen_jobs(new_urls):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    for url in new_urls:
-        cur.execute("INSERT INTO seen_jobs (url) VALUES (%s) ON CONFLICT DO NOTHING", (url,))
-    conn.commit()
-    cur.close()
-    conn.close()
-
-def get_new_jobs():
+def get_new_jobs() -> list[dict]:
     seen = load_seen_jobs()
     all_jobs = get_all_jobs()
     new_jobs = [job for job in all_jobs if job["url"] not in seen]
@@ -323,95 +387,14 @@ def get_new_jobs():
         save_seen_jobs(new_urls)
     return new_jobs
 
+
 if __name__ == "__main__":
     jobs = get_new_jobs()
     if not jobs:
         print("No new relevant jobs tracked in this run.")
     else:
-        print(f"🔥 Detected {len(jobs)} new postings:")
+        print(f"Detected {len(jobs)} new postings:")
         for job in jobs:
-            print(f"\n⚡ {job['company']} - {job['title']}")
-            print(f"   Location: {job['location']}")
-            print(f"   Link: {job['url']}")
-
-def save_subscriber(chat_id):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("CREATE TABLE IF NOT EXISTS subscribers (chat_id BIGINT PRIMARY KEY)")
-    cur.execute("INSERT INTO subscribers (chat_id) VALUES (%s) ON CONFLICT DO NOTHING", (chat_id,))
-    conn.commit()
-    cur.close()
-    conn.close()
-
-def load_subscribers():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("CREATE TABLE IF NOT EXISTS subscribers (chat_id BIGINT PRIMARY KEY)")
-    cur.execute("SELECT chat_id FROM subscribers")
-    ids = set(row[0] for row in cur.fetchall())
-    cur.close()
-    conn.close()
-    return ids
-
-def count_subscribers():
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) FROM subscribers")
-    count = cur.fetchone()[0]
-    cur.close()
-    conn.close()
-    return count
-
-def remove_subscriber(chat_id):
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM subscribers WHERE chat_id = %s", (chat_id,))
-    conn.commit()
-    cur.close()
-    conn.close()
-
-def has_student_seen_job(chat_id, job_url):
-    import hashlib
-    job_url_hash = hashlib.md5(job_url.encode()).hexdigest()[:10]
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS sent_jobs (
-            chat_id BIGINT,
-            job_url_hash TEXT,
-            sent_at TIMESTAMP DEFAULT now(),
-            PRIMARY KEY (chat_id, job_url_hash)
-        )
-    """)
-    cur.execute(
-        "SELECT 1 FROM sent_jobs WHERE chat_id = %s AND job_url_hash = %s",
-        (chat_id, job_url_hash)
-    )
-    seen = cur.fetchone() is not None
-    cur.close()
-    conn.close()
-    return seen
-
-def mark_student_seen_jobs(chat_id, job_urls):
-    if not job_urls:
-        return
-    import hashlib
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS sent_jobs (
-            chat_id BIGINT,
-            job_url_hash TEXT,
-            sent_at TIMESTAMP DEFAULT now(),
-            PRIMARY KEY (chat_id, job_url_hash)
-        )
-    """)
-    for url in job_urls:
-        job_url_hash = hashlib.md5(url.encode()).hexdigest()[:10]
-        cur.execute(
-            "INSERT INTO sent_jobs (chat_id, job_url_hash) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-            (chat_id, job_url_hash)
-        )
-    conn.commit()
-    cur.close()
-    conn.close()
+            print(f"  {job['company']} - {job['title']}")
+            print(f"  Location: {job['location']}")
+            print(f"  Link: {job['url']}")

@@ -8,9 +8,19 @@ from telegram.ext import (
     ConversationHandler, CallbackQueryHandler, filters
 )
 import hashlib
-from scraper import get_new_jobs, get_all_jobs, count_subscribers, has_student_seen_job, mark_student_seen_jobs, load_seen_jobs, save_seen_jobs
+from scraper import get_new_jobs, get_all_jobs
+from db import (
+    supabase,
+    has_student_seen_job,
+    mark_student_seen_jobs,
+    load_seen_jobs,
+    save_seen_jobs,
+    count_subscribers,
+    upsert_jobs_cache,
+    get_cached_jobs,
+    deactivate_stale_jobs,
+)
 from datetime import datetime
-from supabase import create_client
 from dotenv import load_dotenv
 from matching import (
     group_jobs,
@@ -24,7 +34,6 @@ from matching import (
 load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-supabase = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
 
 # Conversation states
 NAME, BRANCH, GRAD_YEAR, SKILLS, ROLES, JOB_TYPE = range(6)
@@ -264,25 +273,49 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     count = count_subscribers()
     await update.message.reply_text(f"🎯 HiringRadar is actively tracking roles for {count} candidates.")
 
-# ── Alert scheduler ────────────────────────────────────────────────────────
+# ── Job 1: Scraper (Producer) ──────────────────────────────────────────────
+# Runs every 5 minutes. Only responsibility: fetch jobs from ATS APIs
+# and write them to jobs_cache in Supabase. Never touches Telegram.
+#
+# WHY SEPARATE: Scraping 36 companies takes 15-20s of blocking HTTP.
+# If this ran inside the alert delivery loop, students would wait 20s
+# before getting their messages. Telegram's JobQueue would time out.
 
-async def send_alerts(context: ContextTypes.DEFAULT_TYPE):
-    # Fetch all currently open jobs
+async def scrape_job(context: ContextTypes.DEFAULT_TYPE):
+    """Producer: scrape all ATS boards and write results to jobs_cache."""
+    print("[scrape_job] Starting scrape...")
+
+    # Run blocking HTTP calls in a thread so the event loop stays free
     all_jobs = await asyncio.to_thread(get_all_jobs)
-    
-    # 1. Identify genuinely brand-new postings for the channel broadcast using seen_jobs
+    print(f"[scrape_job] Scraped {len(all_jobs)} jobs from ATS boards")
+
+    if not all_jobs:
+        print("[scrape_job] No jobs returned — skipping cache update")
+        return
+
+    # Write to jobs_cache — upsert means same job scraped twice = no duplicate
+    await asyncio.to_thread(upsert_jobs_cache, all_jobs)
+
+    # Mark jobs no longer on any ATS as inactive
+    live_ids = {f"{j['company']}|{j['title']}|{j['url']}" for j in all_jobs}
+    # Use the same hash function as db._job_id
+    import hashlib as _hl
+    live_hashed = {_hl.md5(raw.encode()).hexdigest() for raw in live_ids}
+    await asyncio.to_thread(deactivate_stale_jobs, live_hashed)
+
+    # Track new jobs for channel broadcast (seen_jobs dedup)
     seen_urls = await asyncio.to_thread(load_seen_jobs)
     new_jobs = [job for job in all_jobs if job["url"] not in seen_urls]
     if new_jobs:
         new_urls = [job["url"] for job in new_jobs]
         await asyncio.to_thread(save_seen_jobs, new_urls)
-        grouped_jobs = group_jobs(new_jobs)
 
-        # --- Post to Telegram Channel (if configured) ---
+        # Post new jobs to the Telegram channel (if configured)
         CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
         if CHANNEL_ID:
             bot_username = context.bot.username
-            for job in grouped_jobs:
+            grouped_new = group_jobs(new_jobs)
+            for job in grouped_new:
                 try:
                     card = format_job_card(job)
                     text_msg = (
@@ -295,48 +328,66 @@ async def send_alerts(context: ContextTypes.DEFAULT_TYPE):
                         parse_mode="Markdown",
                         disable_web_page_preview=True
                     )
-                    await asyncio.sleep(1)  # rate limit buffer
+                    await asyncio.sleep(1)  # Telegram rate limit buffer
                 except Exception as e:
-                    print(f"Failed to post to channel {CHANNEL_ID}: {e}")
+                    print(f"[scrape_job] Channel post failed: {e}")
 
-    # 2. Match all open jobs against students, checking per-student sent history
-    students = supabase.table("students").select("*").execute().data
-    if not students:
+    print(f"[scrape_job] Done. {len(new_jobs)} new jobs found.")
+
+
+# ── Job 2: Alert Sender (Consumer) ─────────────────────────────────────────
+# Runs every 2 minutes. Only responsibility: read from jobs_cache and
+# deliver personalised Telegram alerts to each student.
+#
+# WHY SEPARATE: This job never makes HTTP requests to ATS boards.
+# get_cached_jobs() is a single fast DB query — takes <100ms.
+# If scraping is slow or fails, students still get alerts from cache.
+
+async def alert_job(context: ContextTypes.DEFAULT_TYPE):
+    """Consumer: match cached jobs to students and deliver Telegram alerts."""
+
+    # Fast DB read — no HTTP scraping
+    all_jobs = await asyncio.to_thread(get_cached_jobs)
+    if not all_jobs:
+        print("[alert_job] jobs_cache is empty — scrape_job may not have run yet")
         return
 
     grouped_all_jobs = group_jobs(all_jobs)
 
+    # Get all non-paused students
+    students = supabase.table("students").select("*").eq("paused", False).execute().data
+    if not students:
+        return
+
+    print(f"[alert_job] Matching {len(grouped_all_jobs)} jobs against {len(students)} students")
+
     for student in students:
-        if student.get("paused"):   # skip users who paused alerts
-            continue
         matched = match_jobs_for_student(student, grouped_all_jobs)
-        send_pairs = matched if matched else []
-        if not send_pairs:
+        if not matched:
             continue
 
-        # Filter out jobs that the student has already seen
-        filtered_send_pairs = []
-        for job, score in send_pairs:
+        # Filter out jobs this student has already seen
+        unseen = []
+        for job, score in matched:
             seen = await asyncio.to_thread(has_student_seen_job, student["chat_id"], job["url"])
             if not seen:
-                filtered_send_pairs.append((job, score))
-        send_pairs = filtered_send_pairs
+                unseen.append((job, score))
 
-        if not send_pairs:
+        if not unseen:
             continue
 
+        # Format and chunk messages (Telegram 4096 char limit per message)
         grad_year = student.get("graduation_year", 2026)
-        job_lines = [format_job_card(job, grad_year, score, student) for job, score in send_pairs]
+        job_lines = [format_job_card(job, grad_year, score, student) for job, score in unseen]
 
         TELEGRAM_LIMIT = 4000
-        chunks, current_chunk, current_len = [], [], 0
-        chunk_pairs = []   # track (job, score) per chunk for buttons
-        current_pairs = []
-        for (job, score), line in zip(send_pairs, job_lines):
+        chunks, chunk_pairs = [], []
+        current_chunk, current_pairs, current_len = [], [], 0
+        for (job, score), line in zip(unseen, job_lines):
             if current_len + len(line) + 2 > TELEGRAM_LIMIT and current_chunk:
                 chunks.append(current_chunk)
                 chunk_pairs.append(current_pairs)
-                current_chunk, current_len, current_pairs = [], 0, []
+                current_chunk, current_pairs, current_len = [], [], 0
             current_chunk.append(line)
             current_pairs.append((job, score))
             current_len += len(line) + 2
@@ -344,13 +395,13 @@ async def send_alerts(context: ContextTypes.DEFAULT_TYPE):
             chunks.append(current_chunk)
             chunk_pairs.append(current_pairs)
 
+        # Send each chunk with feedback buttons
         try:
             for i, chunk in enumerate(chunks):
                 part_info = f" ({i+1}/{len(chunks)})" if len(chunks) > 1 else ""
-                total = len(send_pairs)
+                total = len(unseen)
                 header = f"🔔 *HiringRadar — {total} New {'Opening' if total == 1 else 'Openings'}{part_info}*\n━━━━━━━━━━━━━━━━━━━━━\n"
                 digest = header + "\n\n".join(chunk) + "\n\n━━━━━━━━━━━━━━━━━━━━━"
-                # Build one feedback button per job in this chunk
                 buttons = []
                 for job, _ in chunk_pairs[i]:
                     url_hash = hashlib.md5(job["url"].encode()).hexdigest()[:10]
@@ -358,31 +409,31 @@ async def send_alerts(context: ContextTypes.DEFAULT_TYPE):
                         InlineKeyboardButton("👍 Relevant", callback_data=f"feedback:relevant:{url_hash}"),
                         InlineKeyboardButton("👎 Not for me", callback_data=f"feedback:skip:{url_hash}"),
                     ])
-                keyboard = InlineKeyboardMarkup(buttons)
                 await context.bot.send_message(
                     chat_id=student['chat_id'],
                     text=digest,
                     parse_mode="Markdown",
                     disable_web_page_preview=True,
-                    reply_markup=keyboard
+                    reply_markup=InlineKeyboardMarkup(buttons)
                 )
                 await asyncio.sleep(0.1)
 
-            # Successfully sent all chunks: mark these jobs as seen by the student!
-            sent_urls = [job["url"] for job, _ in send_pairs]
+            # Mark sent — student won't see these again
+            sent_urls = [job["url"] for job, _ in unseen]
             await asyncio.to_thread(mark_student_seen_jobs, student["chat_id"], sent_urls)
 
         except Forbidden:
+            # Student blocked the bot — clean up
             supabase.table("students").delete().eq("chat_id", student['chat_id']).execute()
         except RetryAfter as e:
             await asyncio.sleep(e.retry_after)
         except (TimedOut, NetworkError) as e:
-            # Transient delivery issue — wait a moment and retry once
+            # Transient delivery issue — retry once after 5s
             await asyncio.sleep(5)
             try:
                 for i, chunk in enumerate(chunks):
                     part_info = f" ({i+1}/{len(chunks)})" if len(chunks) > 1 else ""
-                    total = len(send_pairs)
+                    total = len(unseen)
                     header = f"🔔 *HiringRadar — {total} New {'Opening' if total == 1 else 'Openings'}{part_info}*\n━━━━━━━━━━━━━━━━━━━━━\n"
                     digest = header + "\n\n".join(chunk) + "\n\n━━━━━━━━━━━━━━━━━━━━━"
                     buttons = []
@@ -392,13 +443,12 @@ async def send_alerts(context: ContextTypes.DEFAULT_TYPE):
                             InlineKeyboardButton("👍 Relevant", callback_data=f"feedback:relevant:{url_hash}"),
                             InlineKeyboardButton("👎 Not for me", callback_data=f"feedback:skip:{url_hash}"),
                         ])
-                    keyboard = InlineKeyboardMarkup(buttons)
                     await context.bot.send_message(
                         chat_id=student['chat_id'],
                         text=digest,
                         parse_mode="Markdown",
                         disable_web_page_preview=True,
-                        reply_markup=keyboard
+                        reply_markup=InlineKeyboardMarkup(buttons)
                     )
                     await asyncio.sleep(0.1)
                 
@@ -548,7 +598,15 @@ def create_app(token):
     app.add_handler(CommandHandler("resume", resume_alerts))
     app.add_handler(CallbackQueryHandler(feedback_handler, pattern="^feedback:"))
     app.add_handler(CallbackQueryHandler(checkin_callback_handler, pattern="^checkin:"))
-    app.job_queue.run_repeating(send_alerts, interval=300, first=10)
+
+    # ── Two separate scheduled jobs ─────────────────────────────────────────
+    # scrape_job: every 5 min — hits ATS APIs, writes to jobs_cache
+    # alert_job:  every 2 min — reads from jobs_cache, sends Telegram messages
+    #
+    # first=10 means scrape_job fires 10s after bot starts (cache gets populated).
+    # first=30 gives scrape_job time to fill the cache before alerts run.
+    app.job_queue.run_repeating(scrape_job, interval=300, first=10)
+    app.job_queue.run_repeating(alert_job,  interval=120, first=30)
 
     return app
 
