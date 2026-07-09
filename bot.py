@@ -221,20 +221,32 @@ async def jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     res = supabase.table("students").select("*").eq("chat_id", chat_id).execute()
 
-    await update.message.reply_text("🔍 Checking latest roles for you, hold on...")
+    # WHY get_cached_jobs() instead of get_all_jobs():
+    # get_all_jobs() scrapes 36 companies live — takes 15-20 seconds.
+    # get_cached_jobs() reads from Supabase — takes <100ms.
+    # The scrape_job scheduler keeps the cache fresh every 5 minutes.
+    all_jobs = await asyncio.to_thread(get_cached_jobs)
 
-    all_jobs = await asyncio.to_thread(get_all_jobs)
+    if not all_jobs:
+        # Cache is empty — scrape_job hasn't run yet (bot just started)
+        await update.message.reply_text(
+            "⏳ Job data is warming up (first run takes ~30s). "
+            "Try again in a minute — you'll get instant results after that!"
+        )
+        return
+
+    await update.message.reply_text("🔍 Finding your best matches...")
+
     grouped = group_jobs(all_jobs)
-    # Get grad year for tagging
     grad_year = res.data[0].get("graduation_year", datetime.now().year) if res.data else datetime.now().year
 
     if res.data:
         matched = match_jobs_for_student(res.data[0], grouped)
         if matched:
-            display_jobs = matched          # keep (job, score) pairs
+            display_jobs = matched
             label = "matched"
         else:
-            # Fallback: sample one job per company for variety
+            # No role matches — show a varied sample instead
             import random
             sampled = {}
             for job in grouped:
@@ -268,6 +280,7 @@ async def jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",
         disable_web_page_preview=True
     )
+
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     count = count_subscribers()
