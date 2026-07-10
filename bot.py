@@ -719,6 +719,19 @@ async def share(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     college_context = f" to join your college circle ({college_name})" if college_name else ""
 
+    import urllib.parse
+    share_text = (
+        f"Get SDE, MBA, and Design placement/internship matching alerts directly on Telegram! 🚀\n"
+        f"Unlock instant notifications and campus drives here:"
+    )
+    encoded_text = urllib.parse.quote(share_text)
+    encoded_url = urllib.parse.quote(ref_link)
+    telegram_share_url = f"https://t.me/share/url?url={encoded_url}&text={encoded_text}"
+
+    reply_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✉️ Share with Friends", url=telegram_share_url)]
+    ])
+
     await update.message.reply_text(
         f"🎁 *HiringRadar Referral Program*\n━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"Get friends{college_context} to join and unlock *Premium Alerts* (Instant alerts instead of 2-hour delay)!\n\n"
@@ -727,9 +740,10 @@ async def share(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👥 Successful Invites: *{stats['count']}*\n\n"
         f"🔗 *Your Invite Link:*\n"
         f"👉 [HiringRadar Invite Link]({ref_link})\n\n"
-        f"Copy and forward the link above to your college groups! 🚀",
+        f"Click the button below to share instantly to your groups! 🚀",
         parse_mode="Markdown",
-        disable_web_page_preview=True
+        disable_web_page_preview=True,
+        reply_markup=reply_markup
     )
 
 async def update_skills(update: Update, context: ContextTypes.DEFAULT_TYPE):
