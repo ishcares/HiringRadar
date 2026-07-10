@@ -691,6 +691,26 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     dept_names = {"cse": "CSE/IT", "mba": "MBA/Business", "design": "Design", "other": "Other"}
     dept_label = dept_names.get(s.get("department"), "Other")
 
+    import urllib.parse
+    bot_username = context.bot.username or "Hiringradar_bot"
+    ref_code = s.get("referral_code") or ensure_referral_code(chat_id)
+    ref_link = f"https://t.me/{bot_username}?start=ref_{ref_code}"
+    
+    share_text = (
+        f"Get SDE, MBA, and Design placement/internship matching alerts directly on Telegram! 🚀\n"
+        f"Unlock instant notifications and campus drives here:"
+    )
+    encoded_text = urllib.parse.quote(share_text)
+    encoded_url = urllib.parse.quote(ref_link)
+    telegram_share_url = f"https://t.me/share/url?url={encoded_url}&text={encoded_text}"
+
+    reply_markup = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✏️ Edit Profile", callback_data="onboard:edit"),
+            InlineKeyboardButton("✉️ Share with Friends", url=telegram_share_url)
+        ]
+    ])
+
     await update.message.reply_text(
         f"👤 *Your Profile*\n\n"
         f"🙋 Name: {s['name']}\n"
@@ -702,7 +722,8 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💼 Job type: {s['job_type']}\n"
         f"👑 Account: *{tier_label}*\n"
         f"🔔 Alerts: {paused_status}",
-        parse_mode="Markdown"
+        parse_mode="Markdown",
+        reply_markup=reply_markup
     )
 
 async def share(update: Update, context: ContextTypes.DEFAULT_TYPE):
