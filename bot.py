@@ -43,19 +43,22 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 NAME, COLLEGE, DEPARTMENT, BRANCH, GRAD_YEAR, SKILLS, ROLES, JOB_TYPE, EDIT_COLLEGE, EDIT_DEPARTMENT = range(10)
 
 def format_job_card(job: dict, grad_year: int = 2026, score: float = 0.0, student: dict = None) -> str:
-    """Single place to format a job card — used everywhere"""
-    count_label = f" _({job['count']} openings)_" if job.get('count', 1) > 1 else ""
-    score_line = f"🎯 Match: {round(score * 100)}%\n" if score > 0 else ""
-    reason_line = f"💡 _{build_match_reason(job, student)}_\n" if student and score > 0 else ""
+    """Sleek, minimal placement card formatting."""
+    exp = get_experience_tag(job['title'])
+    grad = get_graduation_tag(job['title'], grad_year)
+    details = f"{job['location']} · {exp} ({grad})"
+    
+    score_line = ""
+    if score > 0:
+        pct = round(score * 100)
+        reason = build_match_reason(job, student)
+        score_line = f"🎯 {pct}% Match — _{reason}_\n"
+
     return (
-        f"🏢 *{job['company']}*\n"
-        f"💼 {job['title']}{count_label}\n"
-        f"🏷️ {get_experience_tag(job['title'])}\n"
-        f"🎓 {get_graduation_tag(job['title'], grad_year)}\n"
-        f"📍 {job['location']}\n"
+        f"*{job['company']}* — {job['title']}\n"
+        f"📍 {details}\n\n"
         f"{score_line}"
-        f"{reason_line}"
-        f"[→ Apply Now]({job['url']})"
+        f"[Apply Now]({job['url']})"
     )
 
 # ── Onboarding conversation ────────────────────────────────────────────────
