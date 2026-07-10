@@ -1,7 +1,7 @@
 import os
 import sys
 import asyncio
-from telegram import Bot
+from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.error import Forbidden, RetryAfter
 from dotenv import load_dotenv
 
@@ -13,23 +13,6 @@ if not BOT_TOKEN:
     BOT_TOKEN = input("Enter your Telegram BOT_TOKEN: ").strip()
 
 bot = Bot(token=BOT_TOKEN)
-
-MESSAGE = """
-🚀 *HiringRadar just got a big upgrade!*
-
-Here's what's new for you:
-
-🎯 *Match score* — every job now shows how well it fits your profile _(e.g. 84%)_
-💡 *Why it matched* — a short reason with every job card
-✏️ *Edit your profile anytime:*
-  `/skills` Python, ML, SQL
-  `/roles` backend, ml
-  `/experience` internship / fulltime / both
-⏸️ `/pause` and ▶️ `/resume` — control when you get alerts
-👍 *Thumbs up / down* on job cards — help us send better matches
-
-Type /profile to see your updated profile and all commands!
-"""
 
 async def broadcast():
     bot_info = await bot.get_me()
@@ -50,6 +33,11 @@ async def broadcast():
     except Exception as e:
         print(f"❌ Failed to connect to Supabase: {e}")
         return
+
+    # Dynamic inline button for instant update redirection
+    reply_markup = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✏️ Update College & Department", callback_data="onboard:edit")]
+    ])
 
     if "--all" not in sys.argv:
         # Test mode — sends only to the ADMIN_CHAT_ID
@@ -72,13 +60,18 @@ async def broadcast():
             f"1. *College Tracking:* Update your college to get prioritized campus drive alerts.\n"
             f"2. *MBA & Business Roles:* We now track Product Management (PM), Business Analyst, Strategy, Consulting, and Finance roles!\n\n"
             f"✏️ *Action Required:*\n"
-            f"Please type /start in the bot to update your profile and select your *College* and *Department* (CSE, MBA, Design).\n\n"
+            f"Click the button below to update your profile in 10 seconds!\n\n"
             f"🔗 *Invite your classmates{college_str}:*\n"
             f"Copy and forward this message to your college groups! If 3 people join using your link, you get *HiringRadar Premium* (Instant alerts instead of 2hr delay) for 7 days:\n"
             f"👉 https://t.me/{bot_username}?start=ref_{ref_code}"
         )
         try:
-            await bot.send_message(chat_id=int(admin_id), text=custom_msg, parse_mode="Markdown")
+            await bot.send_message(
+                chat_id=int(admin_id),
+                text=custom_msg,
+                parse_mode="Markdown",
+                reply_markup=reply_markup
+            )
             print("✅ Sent! Check your Telegram.")
             print("\nHappy with it? Run this to send to all users:  python broadcast.py --all")
         except Exception as e:
@@ -109,14 +102,19 @@ async def broadcast():
             f"1. *College Tracking:* Update your college to get prioritized campus drive alerts.\n"
             f"2. *MBA & Business Roles:* We now track Product Management (PM), Business Analyst, Strategy, Consulting, and Finance roles!\n\n"
             f"✏️ *Action Required:*\n"
-            f"Please type /start in the bot to update your profile and select your *College* and *Department* (CSE, MBA, Design).\n\n"
+            f"Click the button below to update your profile in 10 seconds!\n\n"
             f"🔗 *Invite your classmates{college_str}:*\n"
             f"Copy and forward this message to your college groups! If 3 people join using your link, you get *HiringRadar Premium* (Instant alerts instead of 2hr delay) for 7 days:\n"
             f"👉 https://t.me/{bot_username}?start=ref_{ref_code}"
         )
 
         try:
-            await bot.send_message(chat_id=s["chat_id"], text=custom_msg, parse_mode="Markdown")
+            await bot.send_message(
+                chat_id=s["chat_id"],
+                text=custom_msg,
+                parse_mode="Markdown",
+                reply_markup=reply_markup
+            )
             sent += 1
             print(f"  ✅ Sent to {s.get('name', s['chat_id'])}")
             await asyncio.sleep(0.1)  # Rate limiting prevention
@@ -127,7 +125,12 @@ async def broadcast():
             print(f"  ⚠️ Rate limited - waiting {e.retry_after}s")
             await asyncio.sleep(e.retry_after)
             try:
-                await bot.send_message(chat_id=s["chat_id"], text=custom_msg, parse_mode="Markdown")
+                await bot.send_message(
+                    chat_id=s["chat_id"],
+                    text=custom_msg,
+                    parse_mode="Markdown",
+                    reply_markup=reply_markup
+                )
                 sent += 1
             except Exception:
                 failed += 1
