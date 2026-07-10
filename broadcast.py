@@ -39,6 +39,8 @@ async def broadcast():
         [InlineKeyboardButton("✏️ Update College & Department", callback_data="onboard:edit")]
     ])
 
+    import urllib.parse
+
     if "--all" not in sys.argv:
         # Test mode — sends only to the ADMIN_CHAT_ID
         admin_id = os.getenv("ADMIN_CHAT_ID")
@@ -52,6 +54,20 @@ async def broadcast():
         ref_code = res.data[0].get("referral_code") if res.data else "test_code"
         college = res.data[0].get("college") if res.data else "your college"
         
+        ref_link = f"https://t.me/{bot_username}?start=ref_{ref_code}"
+        share_text = (
+            f"Get SDE, MBA, and Design placement/internship matching alerts directly on Telegram! 🚀\n"
+            f"Unlock instant notifications and campus drives here:"
+        )
+        encoded_text = urllib.parse.quote(share_text)
+        encoded_url = urllib.parse.quote(ref_link)
+        telegram_share_url = f"https://t.me/share/url?url={encoded_url}&text={encoded_text}"
+
+        reply_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✏️ Update Profile", callback_data="onboard:edit")],
+            [InlineKeyboardButton("✉️ Share with Friends", url=telegram_share_url)]
+        ])
+
         college_str = f" to join your college circle ({college})" if college else ""
         custom_msg = (
             f"🎓 *HiringRadar Upgraded: College & Multi-Dept Support!* 🎓\n\n"
@@ -63,14 +79,15 @@ async def broadcast():
             f"Click the button below to update your profile in 10 seconds!\n\n"
             f"🔗 *Invite your classmates{college_str}:*\n"
             f"Copy and forward this message to your college groups! If 3 people join using your link, you get *HiringRadar Premium* (Instant alerts instead of 2hr delay) for 7 days:\n"
-            f"👉 https://t.me/{bot_username}?start=ref_{ref_code}"
+            f"👉 [HiringRadar Invite Link]({ref_link})"
         )
         try:
             await bot.send_message(
                 chat_id=int(admin_id),
                 text=custom_msg,
                 parse_mode="Markdown",
-                reply_markup=reply_markup
+                reply_markup=reply_markup,
+                disable_web_page_preview=True
             )
             print("✅ Sent! Check your Telegram.")
             print("\nHappy with it? Run this to send to all users:  python broadcast.py --all")
@@ -94,7 +111,21 @@ async def broadcast():
         ref_code = s.get("referral_code") or "invite"
         college = s.get("college")
         college_str = f" to join your college circle ({college})" if college else ""
+        ref_link = f"https://t.me/{bot_username}?start=ref_{ref_code}"
         
+        share_text = (
+            f"Get SDE, MBA, and Design placement/internship matching alerts directly on Telegram! 🚀\n"
+            f"Unlock instant notifications and campus drives here:"
+        )
+        encoded_text = urllib.parse.quote(share_text)
+        encoded_url = urllib.parse.quote(ref_link)
+        telegram_share_url = f"https://t.me/share/url?url={encoded_url}&text={encoded_text}"
+
+        reply_markup = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✏️ Update Profile", callback_data="onboard:edit")],
+            [InlineKeyboardButton("✉️ Share with Friends", url=telegram_share_url)]
+        ])
+
         custom_msg = (
             f"🎓 *HiringRadar Upgraded: College & Multi-Dept Support!* 🎓\n\n"
             f"We’ve completely updated our matching engine to support college campus drives and non-tech placement tracking!\n\n"
@@ -105,7 +136,7 @@ async def broadcast():
             f"Click the button below to update your profile in 10 seconds!\n\n"
             f"🔗 *Invite your classmates{college_str}:*\n"
             f"Copy and forward this message to your college groups! If 3 people join using your link, you get *HiringRadar Premium* (Instant alerts instead of 2hr delay) for 7 days:\n"
-            f"👉 https://t.me/{bot_username}?start=ref_{ref_code}"
+            f"👉 [HiringRadar Invite Link]({ref_link})"
         )
 
         try:
@@ -113,7 +144,8 @@ async def broadcast():
                 chat_id=s["chat_id"],
                 text=custom_msg,
                 parse_mode="Markdown",
-                reply_markup=reply_markup
+                reply_markup=reply_markup,
+                disable_web_page_preview=True
             )
             sent += 1
             print(f"  ✅ Sent to {s.get('name', s['chat_id'])}")
@@ -129,7 +161,8 @@ async def broadcast():
                     chat_id=s["chat_id"],
                     text=custom_msg,
                     parse_mode="Markdown",
-                    reply_markup=reply_markup
+                    reply_markup=reply_markup,
+                    disable_web_page_preview=True
                 )
                 sent += 1
             except Exception:
