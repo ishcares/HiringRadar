@@ -40,7 +40,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # Conversation states
-NAME, COLLEGE, DEPARTMENT, BRANCH, GRAD_YEAR, SKILLS, ROLES, JOB_TYPE = range(8)
+NAME, COLLEGE, DEPARTMENT, BRANCH, GRAD_YEAR, SKILLS, ROLES, JOB_TYPE, EDIT_COLLEGE, EDIT_DEPARTMENT = range(10)
 
 def format_job_card(job: dict, grad_year: int = 2026, score: float = 0.0, student: dict = None) -> str:
     """Single place to format a job card — used everywhere"""
@@ -100,12 +100,70 @@ async def start_onboarding_edit(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer()
     await query.message.reply_text(
-        "✏️ *Updating your profile!*\n\n"
-        "Let's reset and save your updated information.\n\n"
-        "*What is your name?*",
+        "✏️ *Let's quickly update your profile with our new features!*\n\n"
+        "🏢 *Which college are you from?*\n\ne.g., VIT Vellore, BITS Pilani, IIM Bangalore",
         parse_mode="Markdown"
     )
-    return NAME
+    return EDIT_COLLEGE
+
+async def get_edit_college(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['college'] = update.message.text.strip()
+    
+    keyboard = [
+        [
+            InlineKeyboardButton("🖥️ CSE/IT", callback_data="edept:cse"),
+            InlineKeyboardButton("📊 MBA/Business", callback_data="edept:mba"),
+        ],
+        [
+            InlineKeyboardButton("🎨 Design", callback_data="edept:design"),
+            InlineKeyboardButton("Other", callback_data="edept:other"),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        "📊 *Select your department:*",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
+    return EDIT_DEPARTMENT
+
+async def get_edit_department(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    chat_id = update.effective_chat.id
+    
+    if query:
+        await query.answer()
+        dept_val = query.data.replace("edept:", "")
+    else:
+        dept_val = update.message.text.strip().lower()
+        
+    college = context.user_data.get('college')
+    
+    try:
+        # Update ONLY college and department in Supabase, keeping existing fields intact!
+        supabase.table("students").update({
+            "college": college,
+            "department": dept_val,
+        }).eq("chat_id", chat_id).execute()
+        
+        dept_names = {"cse": "CSE/IT", "mba": "MBA/Business", "design": "Design", "other": "Other"}
+        dept_label = dept_names.get(dept_val, 'Other')
+        
+        msg_text = (
+            f"✅ *Profile updated successfully!*\n\n"
+            f"🏢 College: {college} ({dept_label})\n\n"
+            f"Your alerts are active! Type /profile to view your complete card. 🚀"
+        )
+        if query:
+            await query.message.reply_text(msg_text, parse_mode="Markdown")
+        else:
+            await update.message.reply_text(msg_text, parse_mode="Markdown")
+            
+    except Exception as e:
+        print(f"Supabase update failed: {e}")
+        await update.message.reply_text("⚠️ Couldn't update your profile right now. Try /start again.")
+        
+    return ConversationHandler.END
 
     # Initialize user_data and save referrer if present
     context.user_data['referred_by_code'] = referrer_code
@@ -863,6 +921,11 @@ def create_app(token):
             SKILLS:     [MessageHandler(filters.TEXT & ~filters.COMMAND, get_skills)],
             ROLES:      [MessageHandler(filters.TEXT & ~filters.COMMAND, get_roles)],
             JOB_TYPE:   [MessageHandler(filters.TEXT & ~filters.COMMAND, get_job_type)],
+            EDIT_COLLEGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_edit_college)],
+            EDIT_DEPARTMENT: [
+                CallbackQueryHandler(get_edit_department, pattern="^edept:"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, get_edit_department)
+            ],
         },
         fallbacks=[
             CommandHandler("cancel", cancel),
