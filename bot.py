@@ -96,6 +96,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
 
+    # Initialize user_data and save referrer if present
+    context.user_data['referred_by_code'] = referrer_code
+
+    await update.message.reply_text(
+        "👋 Welcome to *HiringRadar!*\n\n"
+        "Get real-time job alerts from top Indian product companies — "
+        "Razorpay, CRED, Groww, PhonePe and more.\n\n"
+        "Let's set up your profile in 5 quick steps 🚀\n\n"
+        "*What's your name?*",
+        parse_mode="Markdown"
+    )
+    return NAME
+
 async def start_onboarding_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -164,19 +177,6 @@ async def get_edit_department(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text("⚠️ Couldn't update your profile right now. Try /start again.")
         
     return ConversationHandler.END
-
-    # Initialize user_data and save referrer if present
-    context.user_data['referred_by_code'] = referrer_code
-
-    await update.message.reply_text(
-        "👋 Welcome to *HiringRadar!*\n\n"
-        "Get real-time job alerts from top Indian product companies — "
-        "Razorpay, CRED, Groww, PhonePe and more.\n\n"
-        "Let's set up your profile in 5 quick steps 🚀\n\n"
-        "*What's your name?*",
-        parse_mode="Markdown"
-    )
-    return NAME
 
 async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['name'] = update.message.text.strip()
@@ -721,7 +721,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def share(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    bot_username = context.bot.username
+    bot_username = context.bot.username or "Hiringradar_bot"
     stats = await asyncio.to_thread(get_referral_stats, chat_id)
     
     # Get student college to make referral link college-aware
