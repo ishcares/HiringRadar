@@ -725,7 +725,8 @@ async def share(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Invite *3 friends* → Get *7 days of Premium* free.\n\n"
         f"👤 Status: {premium_status}\n"
         f"👥 Successful Invites: *{stats['count']}*\n\n"
-        f"🔗 *Your Invite Link:*\n{ref_link}\n\n"
+        f"🔗 *Your Invite Link:*\n"
+        f"👉 [HiringRadar Invite Link]({ref_link})\n\n"
         f"Copy and forward the link above to your college groups! 🚀",
         parse_mode="Markdown",
         disable_web_page_preview=True
