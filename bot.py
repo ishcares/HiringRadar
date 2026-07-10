@@ -80,17 +80,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         await update.message.reply_text(
             f"👋 Welcome back, *{student['name']}*!\n\n"
-            f"🔔 Alerts: {paused_status}\n\n"
-            f"━━━━━━━━━━━━━━━━━━━━━\n"
-            f"📦 *What can I do?*\n"
-            f"/jobs — see your latest matches\n"
-            f"/profile — view & update profile\n"
-            f"/skills Python, ML — update skills\n"
-            f"/roles pm, analyst — update roles\n"
-            f"/experience internship — update job type\n"
-            f"/share — get free premium alerts 🎁\n"
-            f"/pause · /resume — toggle alerts\n"
-            f"/stats — see active users",
+            f"🔔 Alerts: {paused_status}",
             reply_markup=reply_markup,
             parse_mode="Markdown"
         )
