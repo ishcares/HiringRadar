@@ -62,19 +62,21 @@ def group_jobs(jobs):
 
 def get_experience_tag(title):
     t = title.lower()
-    if any(k in t for k in ["intern", "internship", "trainee", "campus", "fresher", "new grad"]):
+    
+    # Use word boundary checks to avoid partial matches (like 'intern' inside 'internal')
+    if re.search(r"\b(intern|internship|trainee|campus|fresher|new grad)\b", t):
         return "🌱 Fresher / Intern"
-    if any(k in t for k in ["director", "vp ", "vice president", "head of", "chief"]):
+    if re.search(r"\b(director|vp|vice president|head of|chief)\b", t):
         return "👑 Director / VP"
-    if any(k in t for k in ["engineering manager", "tech lead", "team lead", "lead engineer", "engineering lead"]):
+    if re.search(r"\b(engineering manager|tech lead|team lead|lead engineer|engineering lead|lead)\b", t):
         return "🏆 Manager / Lead"
-    if any(k in t for k in ["principal", "staff", "architect", "sde-3", "sde iii"]):
+    if re.search(r"\b(principal|staff|architect|sde-3|sde iii)\b", t):
         return "⚡ Staff / Principal"
-    if any(k in t for k in ["senior", "sr.", "sde-2", "sde ii"]):
+    if re.search(r"\b(senior|sr|sde-2|sde ii)\b", t):
         return "🚀 Senior (5+ yrs)"
-    if any(k in t for k in ["junior", "jr.", "sde-1", "sde i", "associate"]):
+    if re.search(r"\b(junior|jr|sde-1|sde i|associate)\b", t):
         return "🔵 Junior (0-2 yrs)"
-    if any(k in t for k in ["mid-level", "mid level", "experienced"]):
+    if re.search(r"\b(mid-level|mid level|experienced)\b", t):
         return "💼 Mid-level (2-5 yrs)"
     return "💼 Software Engineer"
 
