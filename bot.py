@@ -743,14 +743,17 @@ async def share(update: Update, context: ContextTypes.DEFAULT_TYPE):
     import urllib.parse
     share_text = (
         f"Get SDE, MBA, and Design placement/internship matching alerts directly on Telegram! 🚀\n"
-        f"Unlock instant notifications and campus drives here:"
+        f"Unlock instant notifications and campus drives here: {ref_link}"
     )
     encoded_text = urllib.parse.quote(share_text)
-    encoded_url = urllib.parse.quote(ref_link)
-    telegram_share_url = f"https://t.me/share/url?url={encoded_url}&text={encoded_text}"
+    telegram_share_url = f"https://t.me/share/url?url={urllib.parse.quote(ref_link)}&text={urllib.parse.quote('Get SDE, MBA, and Design matching alerts! 🚀')}"
+    whatsapp_share_url = f"https://api.whatsapp.com/send?text={encoded_text}"
 
     reply_markup = InlineKeyboardMarkup([
-        [InlineKeyboardButton("✉️ Share with Friends", url=telegram_share_url)]
+        [
+            InlineKeyboardButton("✉️ Share on Telegram", url=telegram_share_url),
+            InlineKeyboardButton("💬 Share on WhatsApp", url=whatsapp_share_url)
+        ]
     ])
 
     await update.message.reply_text(
@@ -761,7 +764,7 @@ async def share(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👥 Successful Invites: *{stats['count']}*\n\n"
         f"🔗 *Your Invite Link:*\n"
         f"👉 [HiringRadar Invite Link]({ref_link})\n\n"
-        f"Click the button below to share instantly to your groups! 🚀",
+        f"Click below to share instantly with classmates! 🚀",
         parse_mode="Markdown",
         disable_web_page_preview=True,
         reply_markup=reply_markup
