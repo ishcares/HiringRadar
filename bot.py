@@ -288,23 +288,26 @@ async def jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
             display_jobs = matched
             label = "matched"
         else:
-            # No role matches — show a varied sample of fresher-friendly latest jobs instead
-            from matching import _filter_fresher_jobs, filter_by_job_type
-            fresher_only = _filter_fresher_jobs(grouped, grad_year, datetime.now().year)
-            filtered_pool = filter_by_job_type(fresher_only, student.get("job_type", "both"))
-            
-            import random
-            sampled = {}
-            for job in filtered_pool:
-                sampled.setdefault(job['company'], job)
-            pool = list(sampled.values())
-            random.shuffle(pool)
-            display_jobs = pool[:5]
-            label = "latest"
+            # Senior/Tech Founder decision: If they have a profile but 0 matches, show a targeted message
+            # instead of pulling unrelated random jobs. This builds high trust.
+            preferred_roles_str = ", ".join(student.get("preferred_roles", []))
+            await update.message.reply_text(
+                f"🔍 *No direct matches found today for your roles:* `{preferred_roles_str}`\n\n"
+                f"We are scanning 36 product portals every 5 minutes and will notify you "
+                f"the second a matching entry-level role is posted! 🚀",
+                parse_mode="Markdown"
+            )
+            return
     else:
+        # Unregistered guest user: Show a random sample of fresher-friendly tech roles
+        from matching import _filter_fresher_jobs, matches_role, keyword_map
+        fresher_only = _filter_fresher_jobs(grouped, 2026, datetime.now().year)
+        all_tech_roles = list(keyword_map.keys())
+        tech_only_pool = [j for j in fresher_only if matches_role(j["title"], all_tech_roles)]
+        
         import random
         sampled = {}
-        for job in grouped:
+        for job in tech_only_pool:
             sampled.setdefault(job['company'], job)
         pool = list(sampled.values())
         random.shuffle(pool)
@@ -368,6 +371,12 @@ async def scrape_job(context: ContextTypes.DEFAULT_TYPE):
     if new_jobs:
         new_urls = [job["url"] for job in new_jobs]
         await asyncio.to_thread(save_seen_jobs, new_urls)
+
+        # Senior/Tech Founder safety limit: If there are more than 15 new jobs (like on cold start / downtime recovery),
+        # we treat it as a backfill run and skip posting them to the channel to prevent spam.
+        if len(new_jobs) > 15:
+            print(f"[scrape_job] Cold start or backfill detected ({len(new_jobs)} jobs). Marking all as seen without posting to channel.")
+            return
 
         # Post new jobs to the Telegram channel (if configured)
         CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
@@ -795,17 +804,49 @@ def create_app(token):
 
     return app
 
+async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Health check endpoint for UptimeRobot monitoring."""
+    await update.message.reply_text("🟢 HiringRadar engine is online and scanning.")
+
+
+async def unknown_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles freeform text messages — pre-agent conversational hook."""
+    text = update.message.text or ""
+    # Future: Route this through Groq Intent Router
+    await update.message.reply_text(
+        "👋 I understand commands like /jobs, /profile, /share, /skills, /roles, /experience, /pause, /resume.\n\n"
+        "💡 Tip: Type /profile to see your current setup or /jobs to see your latest matches!"
+    )
+
+
 if __name__ == "__main__":
     import asyncio
+    from embeddings import get_embeddings_from_hf
+
+    # ── Startup Health Check ────────────────────────────────────────────────
+    # Verify HF embeddings are live. If offline, log a clear warning.
+    # This prevents silent degradation to keyword-only mode without admin awareness.
+    print("[startup] Checking HF embedding API health...")
+    test_result = get_embeddings_from_hf(["health check"])
+    if test_result:
+        print("[startup] ✅ HF embeddings online — semantic matching active.")
+    else:
+        print("[startup] ⚠️  HF embeddings OFFLINE — running in keyword-only fallback mode. Add HF_TOKEN to .env")
+
     app = create_app(BOT_TOKEN)
+
+    # Register /ping and freeform message handler
+    app.add_handler(CommandHandler("ping", ping))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown_message))
+
     print("🚀 HiringRadar backend engine online and scanning...")
-    
+
     # Python 3.13/3.14 event loop policy fix for daemon runtimes
     try:
         loop = asyncio.get_event_loop()
     except RuntimeError:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        
+
     app.run_polling()
 
