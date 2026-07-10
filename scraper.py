@@ -48,6 +48,7 @@ def is_india_location(location: str) -> bool:
 
 
 def is_relevant(title):
+    """Filters core tech roles (SDE, ML, DevOps, etc.)"""
     keywords = [
         "engineer", "developer", "sde", "software", "backend", "frontend",
         "fullstack", "full-stack", "devops", "mobile", "android", "ios",
@@ -56,14 +57,11 @@ def is_relevant(title):
         "staff engineer", "principal engineer", "senior engineer",
         "senior developer", "senior software", "lead engineer",
         "senior data", "senior ml", "senior ai",
-        "data scientist", "data engineer", "data analyst", "machine learning",
+        "data scientist", "data engineer", "machine learning",
         "ml engineer", "ai engineer", "deep learning", "nlp",
-        "product manager", "product analyst", "product intern",
-        "ux", "ui designer",
-        "intern", "internship", "trainee", "campus", "junior", "fresher",
-        "new grad", "graduate engineer", "research engineer", "research intern",
-        "applied scientist", "computer vision", "generative ai", "llm",
-        "prompt engineer", "data science intern", "ml intern", "ai intern",
+        "research engineer", "research intern", "applied scientist",
+        "computer vision", "generative ai", "llm", "prompt engineer",
+        "data science intern", "ml intern", "ai intern",
     ]
     blocklist = [
         "customer success", "customer support", "sales", "marketing",
@@ -77,6 +75,54 @@ def is_relevant(title):
     if any(bad in title_lower for bad in blocklist):
         return False
     return any(keyword in title_lower for keyword in keywords)
+
+
+def is_business_relevant(title: str) -> bool:
+    """Filters MBA/Business roles (PM, APM, Analyst, Consulting, etc.)"""
+    keywords = [
+        "product manager", "apm", "associate product manager", "associate pm",
+        "product analyst", "product intern", "product management",
+        "business analyst", "operations analyst", "strategy analyst",
+        "consultant", "management consultant", "management trainee",
+        "growth manager", "growth analyst", "marketing analyst",
+        "financial analyst", "investment analyst", "corporate finance",
+        "business development", "program manager", "data analyst",
+    ]
+    blocklist = [
+        "customer support", "customer success", "sales representative",
+        "account executive", "human resources", "recruiter", "legal",
+        "copywriter", "content writer", "seo", "social media",
+    ]
+    t = title.lower()
+    if any(b in t for b in blocklist):
+        return False
+    return any(k in t for k in keywords)
+
+
+def is_design_relevant(title: str) -> bool:
+    """Filters Design roles (UX/UI, Product Design, etc.)"""
+    keywords = [
+        "design", "ux", "ui designer", "product design", "figma",
+        "interaction designer", "visual designer", "creative director",
+    ]
+    blocklist = [
+        "engineering", "developer", "sde", "writer",
+    ]
+    t = title.lower()
+    if any(b in t for b in blocklist):
+        return False
+    return any(k in t for k in keywords)
+
+
+def check_job_relevance_and_category(title: str) -> str | None:
+    """Classifies job titles into target categories or returns None if not relevant."""
+    if is_relevant(title):
+        return "tech"
+    if is_business_relevant(title):
+        return "business"
+    if is_design_relevant(title):
+        return "design"
+    return None
 
 _WORKDAY_HEADERS = {
     "Content-Type": "application/json",
@@ -133,7 +179,8 @@ def scrape_workday(company_name, tenant, job_board, wd_num=1):
 
         for job in postings:
             title = job.get("title", "")
-            if not is_relevant(title):
+            category = check_job_relevance_and_category(title)
+            if not category:
                 continue
             location = job.get("locationsText", "Not specified")
             if not is_india_location(location):
@@ -145,6 +192,7 @@ def scrape_workday(company_name, tenant, job_board, wd_num=1):
                 "title": title,
                 "location": location,
                 "url": job_url,
+                "category": category,
             })
 
         # Stop paginating if we got fewer results than the page size
@@ -188,7 +236,8 @@ def scrape_smartrecruiters(company_name: str, company_id: str):
 
         for job in postings:
             title = job.get("name", "")
-            if not is_relevant(title):
+            category = check_job_relevance_and_category(title)
+            if not category:
                 continue
 
             # Location — SmartRecruiters nests it under job.location
@@ -210,6 +259,7 @@ def scrape_smartrecruiters(company_name: str, company_id: str):
                 "title": title,
                 "location": location,
                 "url": job_url,
+                "category": category,
             })
 
         # Paginate until exhausted
@@ -246,7 +296,8 @@ def scrape_greenhouse_json(company_name, board_token):
 
     for job in jobs:
         title = job.get("title", "")
-        if not is_relevant(title):
+        category = check_job_relevance_and_category(title)
+        if not category:
             continue
         location = job.get("location", {}).get("name", "Not specified")
         if not is_india_location(location):
@@ -256,7 +307,8 @@ def scrape_greenhouse_json(company_name, board_token):
             "company": company_name,
             "title": title,
             "location": location,
-            "url": job_url
+            "url": job_url,
+            "category": category,
         })
     return relevant
 
@@ -285,7 +337,8 @@ def scrape_lever(company_name, company_slug):
 
     for job in jobs:
         title = job["text"]
-        if not is_relevant(title):
+        category = check_job_relevance_and_category(title)
+        if not category:
             continue
         location = job["categories"].get("location", "Not specified")
         if not is_india_location(location):
@@ -294,7 +347,8 @@ def scrape_lever(company_name, company_slug):
             "company": company_name,
             "title": title,
             "location": location,
-            "url": job["hostedUrl"]
+            "url": job["hostedUrl"],
+            "category": category,
         })
     return relevant
 

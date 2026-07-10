@@ -23,6 +23,7 @@ _EMBED_CACHE: dict[tuple, list[float]] = {}
 
 
 keyword_map = {
+    # Tech Roles
     "backend":   ["backend", "server", "api", "django", "node", "golang", "java", "spring"],
     "frontend":  ["frontend", "react", "vue", "angular", "ui", "javascript", "css"],
     "ml":        ["machine learning", "ml", "ai", "deep learning", "nlp", "data science"],
@@ -35,6 +36,16 @@ keyword_map = {
     "fullstack": ["fullstack", "full stack", "full-stack"],
     "android":   ["android", "kotlin"],
     "ios":       ["ios", "swift"],
+    
+    # MBA / Business Roles
+    "pm":        ["product manager", "apm", "associate product manager", "associate pm", "product management", "product intern", "product analyst"],
+    "analyst":   ["business analyst", "operations analyst", "strategy analyst", "program analyst", "analyst"],
+    "consulting":["consultant", "consulting", "management trainee", "management consultant"],
+    "growth":    ["growth", "growth hacker", "growth manager", "marketing analyst", "marketing manager"],
+    "finance":   ["finance", "financial analyst", "investment analyst", "corporate finance", "treasury analyst"],
+    
+    # Design Roles
+    "design":    ["design", "ux", "ui designer", "product design", "figma", "interaction designer", "visual designer"],
 }
 
 # Common abbreviations to expand before embedding so the model understands them
@@ -271,6 +282,23 @@ def match_jobs_for_student(
     threshold: float = MATCH_THRESHOLD,
     embed_fn=get_embeddings_from_hf,
 ):
+    # Route job pool by department to keep matching highly targeted
+    dept = (student.get("department") or "cse").lower()
+    
+    # Map student departments to jobs_cache categories
+    if dept in ["cse", "it", "cs", "computer science"]:
+        target_category = "tech"
+    elif dept in ["mba", "management", "bba", "business"]:
+        target_category = "business"
+    elif dept in ["design"]:
+        target_category = "design"
+    else:
+        target_category = None # fallback to show all
+        
+    if target_category:
+        # Filter jobs by category, keeping fallback jobs with None or matching category
+        jobs = [j for j in jobs if j.get("category") == target_category or j.get("category") is None]
+
     jobs = filter_by_job_type(jobs, student.get("job_type", "both"))
     roles = student.get("preferred_roles") or []
     jobs = [j for j in jobs if matches_role(j["title"], roles)]

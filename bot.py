@@ -40,7 +40,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # Conversation states
-NAME, BRANCH, GRAD_YEAR, SKILLS, ROLES, JOB_TYPE = range(6)
+NAME, COLLEGE, DEPARTMENT, BRANCH, GRAD_YEAR, SKILLS, ROLES, JOB_TYPE = range(8)
 
 def format_job_card(job: dict, grad_year: int = 2026, score: float = 0.0, student: dict = None) -> str:
     """Single place to format a job card — used everywhere"""
@@ -106,12 +106,55 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['name'] = update.message.text.strip()
-    await update.message.reply_text("📚 What's your branch?\n\ne.g. CSE / ECE / IT / Mech / MBA")
+    await update.message.reply_text("🏢 *Which college are you from?*\n\ne.g., VIT Vellore, BITS Pilani, IIM Bangalore", parse_mode="Markdown")
+    return COLLEGE
+
+async def get_college(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['college'] = update.message.text.strip()
+    
+    # We display inline buttons for clean department classification
+    keyboard = [
+        [
+            InlineKeyboardButton("🖥️ CSE/IT", callback_data="dept:cse"),
+            InlineKeyboardButton("📊 MBA/Business", callback_data="dept:mba"),
+        ],
+        [
+            InlineKeyboardButton("🎨 Design", callback_data="dept:design"),
+            InlineKeyboardButton("Other", callback_data="dept:other"),
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        "📊 *Select your department:*",
+        reply_markup=reply_markup,
+        parse_mode="Markdown"
+    )
+    return DEPARTMENT
+
+async def get_department(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if query:
+        await query.answer()
+        dept_val = query.data.replace("dept:", "")
+        context.user_data['department'] = dept_val
+        
+        # Guide them to provide specific branch
+        dept_names = {"cse": "CSE/IT", "mba": "MBA/Business", "design": "Design", "other": "Other"}
+        await query.message.reply_text(
+            f"Selected: *{dept_names.get(dept_val, dept_val)}*\n\n"
+            f"📚 *What is your specific branch?*\n\ne.g. Computer Science, Finance, UX Design",
+            parse_mode="Markdown"
+        )
+    else:
+        # Fallback if they typed instead of clicking
+        context.user_data['department'] = update.message.text.strip().lower()
+        await update.message.reply_text("📚 *What is your specific branch?*\n\ne.g. Computer Science, Finance, UX Design", parse_mode="Markdown")
+        
     return BRANCH
 
 async def get_branch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['branch'] = update.message.text.strip().upper()
-    await update.message.reply_text("📅 What's your graduation year?\n\ne.g. 2025 / 2026 / 2027")
+    await update.message.reply_text("📅 *What is your graduation year?*\n\ne.g. 2025 / 2026 / 2027", parse_mode="Markdown")
     return GRAD_YEAR
 
 async def get_grad_year(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -183,6 +226,8 @@ async def get_job_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
         supabase.table("students").upsert({
             "chat_id": chat_id,
             "name": data['name'],
+            "college": data.get('college'),
+            "department": data.get('department', 'cse'),
             "branch": data['branch'],
             "graduation_year": data['graduation_year'],
             "skills": data['skills'],
@@ -216,8 +261,11 @@ async def get_job_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Couldn't save profile right now. Try /start again.")
         return ConversationHandler.END
 
+    dept_names = {"cse": "CSE/IT", "mba": "MBA/Business", "design": "Design", "other": "Other"}
+    dept_label = dept_names.get(data.get('department'), 'Other')
     await update.message.reply_text(
-        f"✅ Profile saved, *{data['name']}*!\n\n"
+        f"✅ *Profile saved, {data['name']}!*\n\n"
+        f"🏢 College: {data.get('college')} ({dept_label})\n"
         f"🎓 Branch: {data['branch']} | Graduating: {data['graduation_year']}\n"
         f"💻 Skills: {', '.join(data['skills'])}\n"
         f"🎯 Roles: {', '.join(data['preferred_roles'])}\n"
@@ -572,11 +620,16 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Check premium status
     premium_active = is_student_premium(chat_id)
     tier_label = "⚡ Premium Tier" if premium_active else "🟢 Free Tier (2hr delay)"
+    
+    dept_names = {"cse": "CSE/IT", "mba": "MBA/Business", "design": "Design", "other": "Other"}
+    dept_label = dept_names.get(s.get("department"), "Other")
 
     await update.message.reply_text(
         f"👤 *Your Profile*\n\n"
         f"🙋 Name: {s['name']}\n"
-        f"🎓 Branch: {s['branch']} | {s['graduation_year']}\n"
+        f"🏢 College: {s.get('college') or 'Not set'}\n"
+        f"📊 Dept: {dept_label} ({s['branch']})\n"
+        f"🎓 Graduating: {s['graduation_year']}\n"
         f"💻 Skills: {', '.join(s['skills'] or [])}\n"
         f"🎯 Roles: {', '.join(s['preferred_roles'] or [])}\n"
         f"💼 Job type: {s['job_type']}\n"
@@ -585,7 +638,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"✏️ *Update your profile:*\n"
         f"`/skills` Python, ML, SQL\n"
-        f"`/roles` backend, ml\n"
+        f"`/roles` pm, analyst\n"
         f"`/experience` internship\n"
         f"`/share` · get free premium\n"
         f"`/pause` · `/resume` alerts",
@@ -597,12 +650,18 @@ async def share(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bot_username = context.bot.username
     stats = await asyncio.to_thread(get_referral_stats, chat_id)
     
+    # Get student college to make referral link college-aware
+    res = supabase.table("students").select("college").eq("chat_id", chat_id).execute()
+    college_name = res.data[0].get("college") if res.data else None
+    
     ref_link = f"https://t.me/{bot_username}?start=ref_{stats['code']}"
     premium_status = "⚡ *Premium Active*" if stats['is_premium'] else "🟢 *Free Tier*"
+    
+    college_context = f" to join your college circle ({college_name})" if college_name else ""
 
     await update.message.reply_text(
         f"🎁 *HiringRadar Referral Program*\n━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"Get friends to join and unlock *Premium Alerts* (Instant alerts instead of 2-hour delay)!\n\n"
+        f"Get friends{college_context} to join and unlock *Premium Alerts* (Instant alerts instead of 2-hour delay)!\n\n"
         f"Invite *3 friends* → Get *7 days of Premium* free.\n\n"
         f"👤 Status: {premium_status}\n"
         f"👥 Successful Invites: *{stats['count']}*\n\n"
@@ -623,9 +682,21 @@ async def update_skills(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def update_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    valid = list(keyword_map.keys())
+    res = supabase.table("students").select("department").eq("chat_id", chat_id).execute()
+    dept = res.data[0].get("department", "cse") if res.data else "cse"
+    
+    # Filter valid options based on department
+    if dept == "cse":
+        valid = ["backend", "frontend", "ml", "data", "devops", "fullstack", "android", "ios"]
+    elif dept == "mba":
+        valid = ["pm", "analyst", "consulting", "growth", "finance"]
+    elif dept == "design":
+        valid = ["design"]
+    else:
+        valid = list(keyword_map.keys())
+
     if not context.args:
-        await update.message.reply_text(f"Usage: /roles backend, ml\nValid options: {', '.join(valid)}")
+        await update.message.reply_text(f"Usage: /roles {', '.join(valid[:2])}\nValid options for your department: {', '.join(valid)}")
         return
     roles = [s.strip().lower() for s in " ".join(context.args).split(",")]
     invalid = [r for r in roles if r not in valid]
@@ -762,12 +833,17 @@ def create_app(token):
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
-            NAME:      [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
-            BRANCH:    [MessageHandler(filters.TEXT & ~filters.COMMAND, get_branch)],
-            GRAD_YEAR: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_grad_year)],
-            SKILLS:    [MessageHandler(filters.TEXT & ~filters.COMMAND, get_skills)],
-            ROLES:     [MessageHandler(filters.TEXT & ~filters.COMMAND, get_roles)],
-            JOB_TYPE:  [MessageHandler(filters.TEXT & ~filters.COMMAND, get_job_type)],
+            NAME:       [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
+            COLLEGE:    [MessageHandler(filters.TEXT & ~filters.COMMAND, get_college)],
+            DEPARTMENT: [
+                CallbackQueryHandler(get_department, pattern="^dept:"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, get_department)
+            ],
+            BRANCH:     [MessageHandler(filters.TEXT & ~filters.COMMAND, get_branch)],
+            GRAD_YEAR:  [MessageHandler(filters.TEXT & ~filters.COMMAND, get_grad_year)],
+            SKILLS:     [MessageHandler(filters.TEXT & ~filters.COMMAND, get_skills)],
+            ROLES:      [MessageHandler(filters.TEXT & ~filters.COMMAND, get_roles)],
+            JOB_TYPE:   [MessageHandler(filters.TEXT & ~filters.COMMAND, get_job_type)],
         },
         fallbacks=[
             CommandHandler("cancel", cancel),
