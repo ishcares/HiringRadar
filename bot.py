@@ -282,15 +282,20 @@ async def jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     grad_year = res.data[0].get("graduation_year", datetime.now().year) if res.data else datetime.now().year
 
     if res.data:
-        matched = match_jobs_for_student(res.data[0], grouped)
+        student = res.data[0]
+        matched = match_jobs_for_student(student, grouped)
         if matched:
             display_jobs = matched
             label = "matched"
         else:
-            # No role matches — show a varied sample instead
+            # No role matches — show a varied sample of fresher-friendly latest jobs instead
+            from matching import _filter_fresher_jobs, filter_by_job_type
+            fresher_only = _filter_fresher_jobs(grouped, grad_year, datetime.now().year)
+            filtered_pool = filter_by_job_type(fresher_only, student.get("job_type", "both"))
+            
             import random
             sampled = {}
-            for job in grouped:
+            for job in filtered_pool:
                 sampled.setdefault(job['company'], job)
             pool = list(sampled.values())
             random.shuffle(pool)
@@ -368,7 +373,14 @@ async def scrape_job(context: ContextTypes.DEFAULT_TYPE):
         CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
         if CHANNEL_ID:
             bot_username = context.bot.username
-            grouped_new = group_jobs(new_jobs)
+            
+            # Senior/Tech Founder filter: Only push fresher-friendly & intern positions to the channel.
+            # This prevents channel alert fatigue.
+            from matching import _filter_fresher_jobs
+            # Treat channel audience as current/recent grads (2026/fresher)
+            fresher_new_jobs = _filter_fresher_jobs(new_jobs, datetime.now().year, datetime.now().year)
+            
+            grouped_new = group_jobs(fresher_new_jobs)
             for job in grouped_new:
                 try:
                     card = format_job_card(job)
@@ -784,7 +796,16 @@ def create_app(token):
     return app
 
 if __name__ == "__main__":
+    import asyncio
     app = create_app(BOT_TOKEN)
     print("🚀 HiringRadar backend engine online and scanning...")
+    
+    # Python 3.13/3.14 event loop policy fix for daemon runtimes
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
     app.run_polling()
 
