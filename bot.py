@@ -708,14 +708,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🎯 Roles: {', '.join(s['preferred_roles'] or [])}\n"
         f"💼 Job type: {s['job_type']}\n"
         f"👑 Account: *{tier_label}*\n"
-        f"🔔 Alerts: {paused_status}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"✏️ *Update your profile:*\n"
-        f"/skills Python, ML, SQL — update skills\n"
-        f"/roles pm, analyst — update roles\n"
-        f"/experience internship — update job type\n"
-        f"/share — get free premium alerts 🎁\n"
-        f"/pause · /resume — toggle alerts",
+        f"🔔 Alerts: {paused_status}",
         parse_mode="Markdown"
     )
 
