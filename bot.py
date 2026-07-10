@@ -72,8 +72,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if res.data:
         student = res.data[0]
         paused_status = "⏸️ Paused" if student.get("paused") else "🟢 Active"
-        # Make sure they have a referral code
         code = await asyncio.to_thread(ensure_referral_code, chat_id)
+        
+        # Display the Welcome Back card with an Edit Profile button
+        keyboard = [[InlineKeyboardButton("✏️ Edit Profile / Settings", callback_data="onboard:edit")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
         await update.message.reply_text(
             f"👋 Welcome back, *{student['name']}*!\n\n"
             f"🔔 Alerts: {paused_status}\n\n"
@@ -82,14 +86,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"/jobs — see your latest matches\n"
             f"/profile — view & update profile\n"
             f"/skills Python, ML — update skills\n"
-            f"/roles backend, ml — update roles\n"
+            f"/roles pm, analyst — update roles\n"
             f"/experience internship — update job type\n"
             f"/share — get free premium alerts 🎁\n"
             f"/pause · /resume — toggle alerts\n"
             f"/stats — see active users",
+            reply_markup=reply_markup,
             parse_mode="Markdown"
         )
         return ConversationHandler.END
+
+async def start_onboarding_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text(
+        "✏️ *Updating your profile!*\n\n"
+        "Let's reset and save your updated information.\n\n"
+        "*What is your name?*",
+        parse_mode="Markdown"
+    )
+    return NAME
 
     # Initialize user_data and save referrer if present
     context.user_data['referred_by_code'] = referrer_code
@@ -831,7 +847,10 @@ def create_app(token):
     app = ApplicationBuilder().token(token).post_init(on_startup).build()
 
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
+        entry_points=[
+            CommandHandler("start", start),
+            CallbackQueryHandler(start_onboarding_edit, pattern="^onboard:edit")
+        ],
         states={
             NAME:       [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
             COLLEGE:    [MessageHandler(filters.TEXT & ~filters.COMMAND, get_college)],
