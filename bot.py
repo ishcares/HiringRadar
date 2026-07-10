@@ -921,6 +921,7 @@ def create_app(token):
             CommandHandler("jobs", jobs),
         ],
         allow_reentry=True,
+        per_message=False,
     )
 
     app.add_handler(conv_handler)
