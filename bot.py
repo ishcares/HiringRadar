@@ -711,11 +711,11 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🔔 Alerts: {paused_status}\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"✏️ *Update your profile:*\n"
-        f"`/skills` Python, ML, SQL\n"
-        f"`/roles` pm, analyst\n"
-        f"`/experience` internship\n"
-        f"`/share` · get free premium\n"
-        f"`/pause` · `/resume` alerts",
+        f"/skills Python, ML, SQL — update skills\n"
+        f"/roles pm, analyst — update roles\n"
+        f"/experience internship — update job type\n"
+        f"/share — get free premium alerts 🎁\n"
+        f"/pause · /resume — toggle alerts",
         parse_mode="Markdown"
     )
 
