@@ -505,6 +505,14 @@ async def alert_job(context: ContextTypes.DEFAULT_TYPE):
     if not students:
         return
 
+    # Filter to staging accounts if whitelist environment variable is set
+    staging_ids_str = os.getenv("STAGING_CHAT_IDS", "")
+    if staging_ids_str:
+        staging_ids = [int(x.strip()) for x in staging_ids_str.split(",") if x.strip()]
+        students = [s for s in students if s["chat_id"] in staging_ids]
+        if not students:
+            return
+
     # To optimize, we split students into premium vs free, and fetch jobs accordingly
     premium_student_ids = []
     free_student_ids = []
