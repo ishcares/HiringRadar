@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Tuning knobs — override via env vars without redeploying
 # ---------------------------------------------------------------------------
-MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.25"))
+MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.15"))
 ROLE_BONUS      = float(os.getenv("ROLE_BONUS",      "0.15"))
 INTERN_BONUS    = float(os.getenv("INTERN_BONUS",    "0.05"))
 
