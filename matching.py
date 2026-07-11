@@ -214,6 +214,13 @@ def _keyword_fallback_scores(jobs: list, roles: list, grad_year: int, current_ye
     return scores
 
 
+def is_senior(title: str) -> bool:
+    """Check if the job title indicates a senior role."""
+    title_lower = title.lower()
+    senior_keywords = ["senior", "lead", "staff", "architect", "manager", "ii", "iii", "iv", "v", "principal"]
+    return any(f" {k} " in f" {title_lower} " or title_lower.endswith(f" {k}") for k in senior_keywords)
+
+
 def _score_jobs(jobs: list, student: dict, roles: list, embed_fn) -> list[float]:
     """Return raw cosine scores (+ bonuses) for each job.
 
@@ -264,6 +271,8 @@ def _score_jobs(jobs: list, student: dict, roles: list, embed_fn) -> list[float]
             scores[i] = min(1.0, scores[i] + ROLE_BONUS)
         if grad_year >= current_year - 1 and is_internship(job):
             scores[i] = min(1.0, scores[i] + INTERN_BONUS)
+        if is_senior(job["title"]):
+            scores[i] = max(0.0, scores[i] - 0.10)
 
     return scores
 
