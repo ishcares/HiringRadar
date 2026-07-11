@@ -269,7 +269,14 @@ def _score_jobs(jobs: list, student: dict, roles: list, embed_fn) -> list[float]
 
 
 def _rescale_for_display(score: float) -> float:
-    """Rescale raw cosine (~0.25-0.75) to a display-friendly 0-1 range."""
+    """Rescale scores to a display-friendly 0-1 range, handling fallback values."""
+    if score == 0.20:
+        return 0.90  # 90% Match
+    elif score == 0.15:
+        return 0.80  # 80% Match
+    elif score == 0.05:
+        return 0.65  # 65% Match
+        
     display_floor, display_ceil = 0.25, 0.75
     display_score = (score - display_floor) / (display_ceil - display_floor)
     return round(max(0.0, min(1.0, display_score)), 4)
