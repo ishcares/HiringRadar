@@ -24,7 +24,7 @@ _EMBED_CACHE: dict[tuple, list[float]] = {}
 
 keyword_map = {
     # Tech Roles
-    "backend":   ["backend", "server", "api", "django", "node", "golang", "java", "spring"],
+    "backend":   ["backend", "server", "api", "django", "node", "golang", "java", "spring", "software engineer", "software developer", "sde"],
     "frontend":  ["frontend", "react", "vue", "angular", "ui", "javascript", "css"],
     "ml":        ["machine learning", "ml", "ai", "deep learning", "nlp", "data science"],
     "data":      ["data engineer", "data analyst", "analytics", "sql", "etl"],
@@ -33,7 +33,7 @@ keyword_map = {
         "infrastructure", "platform engineer", "devsecops", "helm",
         "terraform", "ci/cd", "gitops",
     ],
-    "fullstack": ["fullstack", "full stack", "full-stack"],
+    "fullstack": ["fullstack", "full stack", "full-stack", "software engineer", "software developer", "sde"],
     "android":   ["android", "kotlin"],
     "ios":       ["ios", "swift"],
     
