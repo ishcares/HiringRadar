@@ -487,41 +487,6 @@ async def scrape_job(context: ContextTypes.DEFAULT_TYPE):
         new_urls = [job["url"] for job in new_jobs]
         await asyncio.to_thread(save_seen_jobs, new_urls)
 
-        # Senior/Tech Founder safety limit: If there are more than 15 new jobs (like on cold start / downtime recovery),
-        # we treat it as a backfill run and skip posting them to the channel to prevent spam.
-        if len(new_jobs) > 15:
-            print(f"[scrape_job] Cold start or backfill detected ({len(new_jobs)} jobs). Marking all as seen without posting to channel.")
-            return
-
-        # Post new jobs to the Telegram channel (if configured)
-        CHANNEL_ID = os.getenv("TELEGRAM_CHANNEL_ID")
-        if CHANNEL_ID:
-            bot_username = context.bot.username
-            
-            # Senior/Tech Founder filter: Only push fresher-friendly & intern positions to the channel.
-            # This prevents channel alert fatigue.
-            from matching import _filter_fresher_jobs
-            # Treat channel audience as current/recent grads (2026/fresher)
-            fresher_new_jobs = _filter_fresher_jobs(new_jobs, datetime.now().year, datetime.now().year)
-            
-            grouped_new = group_jobs(fresher_new_jobs)
-            for job in grouped_new:
-                try:
-                    card = format_job_card(job)
-                    text_msg = (
-                        f"📢 *New Job Alert!*\n━━━━━━━━━━━━━━━━━━━━━\n\n{card}\n\n"
-                        f"🤖 *[Get Personalized Match Alerts](https://t.me/{bot_username})*"
-                    )
-                    await context.bot.send_message(
-                        chat_id=CHANNEL_ID,
-                        text=text_msg,
-                        parse_mode="Markdown",
-                        disable_web_page_preview=True
-                    )
-                    await asyncio.sleep(1)  # Telegram rate limit buffer
-                except Exception as e:
-                    print(f"[scrape_job] Channel post failed: {e}")
-
     print(f"[scrape_job] Done. {len(new_jobs)} new jobs found.")
 
 
