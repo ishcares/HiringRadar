@@ -210,6 +210,8 @@ def _keyword_fallback_scores(jobs: list, roles: list, grad_year: int, current_ye
             score += ROLE_BONUS
         if grad_year >= current_year - 1 and is_internship(job):
             score += INTERN_BONUS
+        if is_non_tech(job["title"]):
+            score = 0.0
         scores.append(score)
     return scores
 
@@ -219,6 +221,25 @@ def is_senior(title: str) -> bool:
     title_lower = title.lower()
     senior_keywords = ["senior", "lead", "staff", "architect", "manager", "ii", "iii", "iv", "v", "principal"]
     return any(f" {k} " in f" {title_lower} " or title_lower.endswith(f" {k}") for k in senior_keywords)
+
+
+def is_non_tech(title: str) -> bool:
+    """Return True if the job title indicates a non-engineering/non-tech role."""
+    title_lower = title.lower()
+    non_tech_keywords = [
+        "collection manager", 
+        "lending collections", 
+        "sales executive", 
+        "business development executive",
+        "bde", 
+        "telecaller", 
+        "customer support", 
+        "hr recruiter",
+        "operations executive",
+        "marketing manager",
+        "area collection"
+    ]
+    return any(k in title_lower for k in non_tech_keywords)
 
 
 def _score_jobs(jobs: list, student: dict, roles: list, embed_fn) -> list[float]:
@@ -273,6 +294,8 @@ def _score_jobs(jobs: list, student: dict, roles: list, embed_fn) -> list[float]
             scores[i] = min(1.0, scores[i] + INTERN_BONUS)
         if is_senior(job["title"]):
             scores[i] = max(0.0, scores[i] - 0.10)
+        if is_non_tech(job["title"]):
+            scores[i] = 0.0
 
     return scores
 

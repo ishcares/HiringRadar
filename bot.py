@@ -23,6 +23,7 @@ from db import (
     record_referral,
     get_referral_stats,
     is_student_premium,
+    check_and_deactivate_dead_link,
 )
 from datetime import datetime
 from dotenv import load_dotenv
@@ -41,12 +42,37 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # Conversation states
 NAME, COLLEGE, DEPARTMENT, BRANCH, GRAD_YEAR, SKILLS, ROLES, JOB_TYPE, EDIT_COLLEGE, EDIT_DEPARTMENT = range(10)
+def get_time_ago_string(scraped_at_str: str) -> str:
+    """Returns a 'time ago' string for the scraped timestamp."""
+    from datetime import datetime, timezone
+    from dateutil.parser import parse
+    if not scraped_at_str:
+        return "new"
+    try:
+        scraped_at = parse(scraped_at_str)
+        now = datetime.now(timezone.utc)
+        diff = now - scraped_at
+        
+        minutes = int(diff.total_seconds() / 60)
+        hours = int(minutes / 60)
+        days = int(hours / 24)
+        
+        if minutes < 60:
+            return f"{max(1, minutes)}m ago"
+        elif hours < 24:
+            return f"{hours}h ago"
+        else:
+            return f"{days}d ago"
+    except Exception:
+        return "recent"
+
 
 def format_job_card(job: dict, grad_year: int = 2026, score: float = 0.0, student: dict = None) -> str:
     """Sleek, minimal placement card formatting."""
     exp = get_experience_tag(job['title'])
     grad = get_graduation_tag(job['title'], grad_year)
-    details = f"{job['location']} · {exp} ({grad})"
+    time_ago = get_time_ago_string(job.get('scraped_at'))
+    details = f"{job['location']} · {exp} ({grad}) · {time_ago}"
     
     score_line = ""
     if score > 0:
@@ -60,6 +86,7 @@ def format_job_card(job: dict, grad_year: int = 2026, score: float = 0.0, studen
         f"{score_line}"
         f"[Apply Now]({job['url']})"
     )
+
 
 # ── Onboarding conversation ────────────────────────────────────────────────
 
@@ -558,7 +585,9 @@ async def alert_job(context: ContextTypes.DEFAULT_TYPE):
         for job, score in matched:
             seen = await asyncio.to_thread(has_student_seen_job, chat_id, job["url"])
             if not seen:
-                unseen.append((job, score))
+                is_live = await asyncio.to_thread(check_and_deactivate_dead_link, job.get("id"), job["url"])
+                if is_live:
+                    unseen.append((job, score))
 
         if not unseen:
             continue

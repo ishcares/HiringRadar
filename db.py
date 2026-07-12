@@ -301,7 +301,7 @@ def get_cached_jobs(delay_hours: int = 0) -> list[dict]:
     If delay_hours is specified, only returns jobs scraped at least delay_hours ago.
     """
     try:
-        query = supabase.table("jobs_cache").select("company, title, location, url, scraped_at, category").eq("is_active", True)
+        query = supabase.table("jobs_cache").select("id, company, title, location, url, scraped_at, category").eq("is_active", True)
         res = query.execute()
         jobs = res.data or []
         if delay_hours > 0:
@@ -360,3 +360,38 @@ def deactivate_stale_jobs(live_job_ids: set[str]) -> int:
     except Exception as e:
         logger.error("deactivate_stale_jobs failed: %s", e)
         return 0
+
+
+def check_and_deactivate_dead_link(job_id: str, url: str) -> bool:
+    """
+    Check if a job link is still live.
+    If it is closed/inactive, we update 'is_active = False' in Supabase and return False.
+    """
+    import requests
+    try:
+        resp = requests.get(url, timeout=5, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        if resp.status_code in [404, 410]:
+            raise ValueError(f"HTTP {resp.status_code} Page Closed")
+            
+        text = resp.text.lower()
+        closed_signals = [
+            "no longer available",
+            "job posting not found",
+            "this job is closed",
+            "position is closed",
+            "no longer accepting applications",
+            "this posting has expired"
+        ]
+        for signal in closed_signals:
+            if signal in text:
+                raise ValueError(f"Found closed signal: '{signal}'")
+                
+        return True
+    except Exception as e:
+        logger.warning("check_and_deactivate_dead_link: deactivating %s because of error: %s", url, e)
+        try:
+            supabase.table("jobs_cache").update({"is_active": False}).eq("id", job_id).execute()
+        except Exception as db_err:
+            logger.error("Failed to update jobs_cache deactivation: %s", db_err)
+        return False
+
