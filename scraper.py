@@ -417,9 +417,9 @@ def get_all_jobs():
     # Verified via api.smartrecruiters.com/v1/companies/{id}/postings
     for name, company_id in [
         ("Freshworks",   "Freshworks"),    # 114 jobs verified — CRM/SaaS, India HQ
-        ("Swiggy",       "Swiggy"),        # 2 jobs verified — food delivery, India HQ
         ("BrowserStack", "BrowserStack"),  # board exists — testing platform, India HQ
         ("Chargebee",    "Chargebee"),     # board exists — billing SaaS, India team
+        ("Zomato",       "zomato"),        # foodtech giant
     ]:
         try:
             all_jobs += scrape_smartrecruiters(name, company_id)
