@@ -419,7 +419,6 @@ def get_all_jobs():
         ("Freshworks",   "Freshworks"),    # 114 jobs verified — CRM/SaaS, India HQ
         ("BrowserStack", "BrowserStack"),  # board exists — testing platform, India HQ
         ("Chargebee",    "Chargebee"),     # board exists — billing SaaS, India team
-        ("Zomato",       "zomato"),        # foodtech giant
     ]:
         try:
             all_jobs += scrape_smartrecruiters(name, company_id)
