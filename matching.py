@@ -98,7 +98,7 @@ def get_graduation_tag(title: str, grad_year: int) -> str:
     exp_tag = get_experience_tag(title)
 
     if years_to_grad <= 0:
-        if any(x in exp_tag for x in ["Fresher", "Intern", "Junior", "General SDE"]):
+        if any(x in exp_tag for x in ["Fresher", "Intern", "Junior", "Software Engineer"]):
             return "✅ Good for you"
         return "⚠️ May need experience"
     elif years_to_grad == 1:
