@@ -304,26 +304,39 @@ def get_cached_jobs(delay_hours: int = 0) -> list[dict]:
         query = supabase.table("jobs_cache").select("id, company, title, location, url, scraped_at, category").eq("is_active", True)
         res = query.execute()
         jobs = res.data or []
-        if delay_hours > 0:
-            from datetime import datetime, timezone, timedelta
-            cutoff = datetime.now(timezone.utc) - timedelta(hours=delay_hours)
-            filtered = []
-            for j in jobs:
-                # Supabase returns ISO timestamps, parse them
-                scraped_at_str = j.get("scraped_at")
-                if scraped_at_str:
-                    try:
-                        # Convert Z to +00:00 if needed for ISO parser compatibility
-                        t_str = scraped_at_str.replace("Z", "+00:00")
-                        t_val = datetime.fromisoformat(t_str)
-                        if t_val <= cutoff:
-                            filtered.append(j)
-                    except ValueError:
-                        filtered.append(j) # Fallback if parsing fails
-                else:
+        
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        
+        # Enforce a hard 36-hour maximum age limit for ALL alerts to prevent sending stale jobs
+        max_age_cutoff = now - timedelta(hours=36)
+        
+        # Enforce minimum delay cutoff if delay_hours is specified
+        delay_cutoff = now - timedelta(hours=delay_hours) if delay_hours > 0 else None
+        
+        filtered = []
+        for j in jobs:
+            scraped_at_str = j.get("scraped_at")
+            if scraped_at_str:
+                try:
+                    t_str = scraped_at_str.replace("Z", "+00:00")
+                    t_val = datetime.fromisoformat(t_str)
+                    
+                    # Job must be fresher than 36 hours
+                    if t_val < max_age_cutoff:
+                        continue
+                        
+                    # For free tier, job must also be older than the delay cutoff
+                    if delay_cutoff and t_val > delay_cutoff:
+                        continue
+                        
                     filtered.append(j)
-            return filtered
-        return jobs
+                except ValueError:
+                    # If date parsing fails, default to include it
+                    filtered.append(j)
+            else:
+                filtered.append(j)
+        return filtered
     except Exception as e:
         logger.error("get_cached_jobs failed: %s", e)
         return []
