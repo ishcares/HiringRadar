@@ -41,8 +41,18 @@ supabase: Client = create_client(_url, _key) if (_url and _key) else None  # typ
 # ---------------------------------------------------------------------------
 
 def _url_hash(url: str) -> str:
-    """Stable 10-char MD5 hash of a job URL — used as dedup key."""
-    return hashlib.md5(url.encode()).hexdigest()[:10]
+    """Normalizes and returns a stable 10-char MD5 hash of a job URL."""
+    # Remove common tracking parameters to prevent duplicate alerts from minor URL changes
+    clean_url = url.split("?")[0]
+    # Keep greenhouse/lever IDs if they are in the query parameters
+    if "gh_jid=" in url:
+        jid = url.split("gh_jid=")[1].split("&")[0]
+        clean_url += f"?gh_jid={jid}"
+    elif "gh_src=" in url:
+        src = url.split("gh_src=")[1].split("&")[0]
+        clean_url += f"?gh_src={src}"
+        
+    return hashlib.md5(clean_url.encode()).hexdigest()[:10]
 
 
 # ---------------------------------------------------------------------------
