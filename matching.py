@@ -321,11 +321,21 @@ def match_jobs_for_student(
     threshold: float = MATCH_THRESHOLD,
     embed_fn=get_embeddings_from_hf,
 ):
-    # Route job pool by department to keep matching highly targeted
+    # Route job pool by department and skills to keep matching highly targeted
     dept = (student.get("department") or "cse").lower()
+    skills = student.get("skills") or []
+    skills_lower = [str(s).lower() for s in skills]
+    
+    # Identify if candidate has hardware/VLSI profile
+    is_hardware = (
+        dept in ["ece", "ee", "electronics", "electrical", "instrumentation"] or
+        any(any(kw in sk for kw in ["vlsi", "synthesis", "physical design", "verilog", "embedded"]) for sk in skills_lower)
+    )
     
     # Map student departments to jobs_cache categories
-    if dept in ["data science", "ds", "machine learning", "ml", "ai", "artificial intelligence"]:
+    if is_hardware:
+        target_category = "hardware"
+    elif dept in ["data science", "ds", "machine learning", "ml", "ai", "artificial intelligence"]:
         target_category = "data_science"
     elif dept in ["cse", "it", "cs", "computer science"]:
         target_category = "tech"
@@ -337,8 +347,8 @@ def match_jobs_for_student(
         target_category = None # fallback to show all
         
     if target_category:
-        # Filter jobs by category, keeping fallback jobs with None or matching category
-        jobs = [j for j in jobs if j.get("category") == target_category or j.get("category") is None]
+        # Filter jobs by category, keeping fallback jobs with matching category
+        jobs = [j for j in jobs if j.get("category") == target_category]
 
     jobs = filter_by_job_type(jobs, student.get("job_type", "both"))
     roles = student.get("preferred_roles") or []

@@ -197,3 +197,36 @@ JSON output format:
             "project_milestones": ["Week 1: Set up database schemas", "Week 2: Implement caching", "Week 3: Deploy using Docker"],
             "resume_hook": "Developed a full-stack platform optimizing database query times and enabling containerized deployment."
         }
+
+def evaluate_resume_for_job(resume_text: str, job_title: str, company: str, job_description: str) -> str:
+    """Evaluates candidate resume against job description using strict recruiter grading rules."""
+    prompt = f"""
+You are a strict Corporate Technical Recruiter and an automated ATS Parser filtering entry-level engineering applications for top-tier technology firms. Evaluate the provided Candidate Resume against the target Job Description.
+
+Calculate a highly realistic market match score based on a maximum of 100 points, strictly penalizing missing infrastructure tools, superficial skill listings, or project scope mismatches.
+
+Apply these hard rules:
+1. If the Job Description explicitly lists a critical stack element (e.g., Docker, Redis, Kubernetes, AWS) and the resume only lists standard MERN framework elements with zero infrastructure projects, automatically deduct 20 points.
+2. If the candidate lists skills in a "Technical Skills" section but fails to implement them inside their listed projects, reduce the Hard Skill Alignment score by 50%.
+3. Grade the projects on structural depth: Simple CRUD or tutorial-based apps get a maximum score of 10/20 for project depth. Systems with architectural complexity (JWT rotation, containerization, microservices) get full points.
+
+--- CANDIDATE RESUME ---
+{resume_text}
+
+--- TARGET JOB DESCRIPTION ---
+Company: {company}
+Role: {job_title}
+Details:
+{job_description}
+
+Return the evaluation strictly in this format:
+- Match Score: [X]%
+- Critical Stack Gaps: [List maximum 3 missing technical keywords/concepts]
+- Project Scope Assessment: [1 sentence on whether their projects match live market demands]
+"""
+    try:
+        text = execute_gemini_with_retry(prompt, model_name='gemini-3.5-flash')
+        return text
+    except Exception as e:
+        print(f"Error in strict resume evaluation: {e}")
+        return f"Error evaluating resume: {e}"

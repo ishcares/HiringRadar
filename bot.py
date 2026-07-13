@@ -35,8 +35,8 @@ from matching import (
     build_match_reason,
     keyword_map,
 )
-
-
+from resume_parser import extract_text_from_pdf
+from ai_agent import evaluate_resume_for_job
 
 load_dotenv()
 
@@ -75,6 +75,7 @@ def format_job_card(job: dict, grad_year: int = 2026, score: float = 0.0, studen
     """Sleek, premium placement card formatting."""
     exp = get_experience_tag(job['title'])
     grad = get_graduation_tag(job['title'], grad_year)
+    time_ago = get_time_ago_string(job.get('scraped_at'))
     
     score_line = ""
     if score > 0:
@@ -87,6 +88,7 @@ def format_job_card(job: dict, grad_year: int = 2026, score: float = 0.0, studen
         f"💼 *Role:* {job['title']}\n"
         f"📍 *Location:* {job['location']}\n"
         f"🌱 *Type:* {exp} ({grad})\n"
+        f"📅 *Posted:* {time_ago}\n"
         f"{score_line}"
         f"🔗 [Apply Directly here]({job['url']})\n"
     )
@@ -658,6 +660,9 @@ async def alert_job(context: ContextTypes.DEFAULT_TYPE):
                         InlineKeyboardButton("👍 Relevant", callback_data=f"feedback:relevant:{url_hash}"),
                         InlineKeyboardButton("👎 Not for me", callback_data=f"feedback:skip:{url_hash}"),
                     ])
+                    buttons.append([
+                        InlineKeyboardButton("🤖 Check Resume Match", callback_data=f"feedback:check_match:{url_hash}")
+                    ])
                 
                 # Send the message
                 await context.bot.send_message(
@@ -693,6 +698,9 @@ async def alert_job(context: ContextTypes.DEFAULT_TYPE):
                         buttons.append([
                             InlineKeyboardButton("👍 Relevant", callback_data=f"feedback:relevant:{url_hash}"),
                             InlineKeyboardButton("👎 Not for me", callback_data=f"feedback:skip:{url_hash}"),
+                        ])
+                        buttons.append([
+                            InlineKeyboardButton("🤖 Check Resume Match", callback_data=f"feedback:check_match:{url_hash}")
                         ])
                     await context.bot.send_message(
                         chat_id=student['chat_id'],
@@ -911,6 +919,19 @@ async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()   # stops the loading spinner on the button
     _, feedback, url_hash = query.data.split(":", 2)
     chat_id = query.from_user.id
+    
+    if feedback == "check_match":
+        context.user_data["waiting_for_resume_hash"] = url_hash
+        privacy_text = (
+            "🔒 *HiringRadar Secure Match:*\n\n"
+            "Please upload your resume in PDF format here. (You can redact your email and phone number if you wish).\n\n"
+            "Our matching engine will run a semantic vector-embedding alignment against the live ATS requirements. "
+            "_(Processing takes 5-10 minutes. We will ping you with your score here!)_"
+        )
+        # Keep buttons intact so user can still click relevant/skip later if they want
+        await query.message.reply_text(privacy_text, parse_mode="Markdown")
+        return
+
     try:
         supabase.table("job_feedback").insert({
             "chat_id": chat_id,
@@ -946,6 +967,58 @@ async def checkin_callback_handler(update: Update, context: ContextTypes.DEFAULT
         await query.message.reply_text("⚠️ Something went wrong saving your response. Send /start to update your profile.")
 
 
+async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles admin actions: approving and forwarding generated resume reports to students."""
+    query = update.callback_query
+    await query.answer()
+    
+    # Format: admin:action:chat_id:url_hash
+    _, action, student_chat_id_str, url_hash = query.data.split(":", 3)
+    student_chat_id = int(student_chat_id_str)
+    
+    report_key = f"pending_report:{student_chat_id}:{url_hash}"
+    report_text = context.bot_data.get(report_key)
+    
+    if action == "approve":
+        if not report_text:
+            await query.edit_message_text("⚠️ Report not found in active memory cache (may have expired).")
+            return
+            
+        try:
+            # 1. Forward the report to the student
+            student_msg = (
+                f"⚡ *HiringRadar SDE Match Score & Gap Analysis:*\n\n"
+                f"{report_text}\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━\n"
+                f"💡 _Verify these gaps and upgrade your projects to unlock direct SDE referral portals!_"
+            )
+            await context.bot.send_message(
+                chat_id=student_chat_id,
+                text=student_msg,
+                parse_mode="Markdown"
+            )
+            
+            # 2. Update queue status in Supabase
+            supabase.table("matching_queue").update({"status": "completed"}).eq("chat_id", student_chat_id).execute()
+            
+            # 3. Clean up cache
+            context.bot_data.pop(report_key, None)
+            
+            await query.edit_message_text(f"✅ *Report successfully sent to Candidate {student_chat_id}!*", parse_mode="Markdown")
+        except Exception as e:
+            print(f"Failed to send approved report to candidate: {e}")
+            await query.message.reply_text(f"❌ Error sending report: {e}")
+            
+    elif action == "reject":
+        try:
+            # Remove from queue
+            supabase.table("matching_queue").delete().eq("chat_id", student_chat_id).execute()
+            context.bot_data.pop(report_key, None)
+            await query.edit_message_text("❌ *Report rejected and cleared from queue.*", parse_mode="Markdown")
+        except Exception as e:
+            print(f"Failed to clear queue for reject: {e}")
+
+
 async def forward_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Forwards any user message to the admin for manual response."""
     admin_chat_id = os.getenv("ADMIN_CHAT_ID")
@@ -974,6 +1047,129 @@ async def forward_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     except Exception as e:
         print(f"Failed to forward message to admin: {e}")
+
+
+async def handle_wizard_resume_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Wizard of Oz handler: parses PDF, runs evaluation, and requests admin approval."""
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+    document = update.message.document
+    admin_chat_id = os.getenv("ADMIN_CHAT_ID")
+    
+    if not document.file_name.lower().endswith(".pdf"):
+        await update.message.reply_text("❌ Please upload your resume in PDF format.")
+        return
+        
+    url_hash = context.user_data.get("waiting_for_resume_hash")
+    if not url_hash:
+        await update.message.reply_text("⚠️ Please click 'Check Resume Match' under a job card first to initiate matching.")
+        return
+        
+    # Get job info from cache to print for admin
+    job_info = "Unknown Job"
+    job_title = "Software Engineer"
+    job_company = "Tech Firm"
+    job_description = "Software engineering duties."
+    try:
+        res = supabase.table("jobs_cache").select("*").execute()
+        for j in res.data:
+            h = hashlib.md5(j["url"].encode()).hexdigest()[:10]
+            if h == url_hash:
+                job_info = f"*{j['company']}* — {j['title']}\n🔗 URL: {j['url']}"
+                job_title = j['title']
+                job_company = j['company']
+                job_description = j.get('description', 'Software engineering duties.')
+                break
+    except Exception as e:
+        print(f"Failed to fetch job info for forward: {e}")
+
+    # 1. Enforce Golden Rule: Check queue capacity
+    queue_msg = "Our matching engine is processing your profile. Estimated time: 2-3 minutes. 🚀"
+    try:
+        # Check active pending queue size
+        q_res = supabase.table("matching_queue").select("chat_id").eq("status", "pending").execute()
+        pending_count = len(q_res.data or [])
+        if pending_count > 0:
+            wait_mins = pending_count * 5
+            queue_msg = f"🔥 *HiringRadar Match Queue is busy:*\nThere are {pending_count} candidates ahead of you.\nEstimated wait time: {wait_mins} minutes. We will alert you the second your score is ready! ⏳"
+    except Exception as q_err:
+        print(f"Queue count failed: {q_err}")
+
+    # Reply to student
+    await update.message.reply_text(
+        f"📥 *Resume received successfully!*\n\n{queue_msg}",
+        parse_mode="Markdown"
+    )
+
+    # 2. Add to database queue
+    try:
+        supabase.table("matching_queue").upsert({
+            "chat_id": chat_id,
+            "job_url_hash": url_hash,
+            "status": "pending"
+        }, on_conflict="chat_id").execute()
+    except Exception as ins_err:
+        print(f"Failed to insert queue row: {ins_err}")
+
+    # 3. Parse PDF locally (Zero-Trust download/parse/delete loop)
+    local_dir = r"C:\Users\ishit\OneDrive\Desktop\HiringRadar\temp_resumes"
+    os.makedirs(local_dir, exist_ok=True)
+    local_path = os.path.join(local_dir, f"{chat_id}_wizard_resume.pdf")
+    
+    try:
+        # Download PDF file
+        new_file = await context.bot.get_file(document.file_id)
+        await new_file.download_to_drive(local_path)
+        
+        # Read text and delete local file instantly
+        resume_text = await asyncio.to_thread(extract_text_from_pdf, local_path)
+        if os.path.exists(local_path):
+            os.remove(local_path)
+            
+        if not resume_text:
+            await update.message.reply_text("⚠️ We couldn't extract text from this PDF. Please ensure it is not a scanned image.")
+            return
+            
+        # 4. Generate Strict Evaluation using Gemini
+        evaluation_text = await asyncio.to_thread(
+            evaluate_resume_for_job, resume_text, job_title, job_company, job_description
+        )
+        
+        # Save generated report to session memory so admin can approve it
+        context.bot_data[f"pending_report:{chat_id}:{url_hash}"] = evaluation_text
+        
+        # 5. Notify Admin with generated evaluation and action buttons
+        if admin_chat_id:
+            admin_text = (
+                f"📝 *New Evaluation Ready for Approval!*\n\n"
+                f"👤 *Candidate:* {user.first_name} (@{user.username or 'none'}) (ID: `{chat_id}`)\n"
+                f"🏢 *Target:* {job_company} — {job_title}\n\n"
+                f"--- GENERATED REPORT ---\n"
+                f"{evaluation_text}\n"
+                f"------------------------\n\n"
+                f"Click below to approve or reject this report:"
+            )
+            buttons = [
+                [
+                    InlineKeyboardButton("✅ Approve & Send", callback_data=f"admin:approve:{chat_id}:{url_hash}"),
+                    InlineKeyboardButton("❌ Reject / Clear", callback_data=f"admin:reject:{chat_id}:{url_hash}")
+                ]
+            ]
+            await context.bot.send_message(
+                chat_id=int(admin_chat_id),
+                text=admin_text,
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(buttons)
+            )
+            
+    except Exception as eval_err:
+        print(f"Autopilot evaluation failed: {eval_err}")
+        if os.path.exists(local_path):
+            os.remove(local_path)
+        await update.message.reply_text("⚠️ Error running AI grader. Our technical team is reviewing this.")
+        
+    # Clear waiting state
+    context.user_data.pop("waiting_for_resume_hash", None)
 
 
 # ── Main ───────────────────────────────────────────────────────────────────
@@ -1043,6 +1239,8 @@ def create_app(token):
     app.add_handler(CommandHandler("resume", resume_alerts))
     app.add_handler(CallbackQueryHandler(feedback_handler, pattern="^feedback:"))
     app.add_handler(CallbackQueryHandler(checkin_callback_handler, pattern="^checkin:"))
+    app.add_handler(CallbackQueryHandler(admin_callback_handler, pattern="^admin:"))
+    app.add_handler(MessageHandler(filters.Document.PDF, handle_wizard_resume_pdf))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, forward_to_admin))
 
     # ── Two separate scheduled jobs ─────────────────────────────────────────
