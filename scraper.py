@@ -48,7 +48,7 @@ def is_india_location(location: str) -> bool:
 
 
 def is_relevant(title):
-    """Filters core tech roles (SDE, ML, DevOps, etc.)"""
+    """Filters core tech roles (SDE, DevOps, Cloud, etc.)"""
     keywords = [
         "engineer", "developer", "sde", "software", "backend", "frontend",
         "fullstack", "full-stack", "devops", "mobile", "android", "ios",
@@ -56,12 +56,6 @@ def is_relevant(title):
         "engineering manager", "tech lead", "sde-2", "sde-3",
         "staff engineer", "principal engineer", "senior engineer",
         "senior developer", "senior software", "lead engineer",
-        "senior data", "senior ml", "senior ai",
-        "data scientist", "data engineer", "machine learning",
-        "ml engineer", "ai engineer", "deep learning", "nlp",
-        "research engineer", "research intern", "applied scientist",
-        "computer vision", "generative ai", "llm", "prompt engineer",
-        "data science intern", "ml intern", "ai intern",
     ]
     blocklist = [
         "customer success", "customer support", "sales", "marketing",
@@ -70,6 +64,26 @@ def is_relevant(title):
         "finance", "accounting", "operations manager", "program manager",
         "content", "copywriter", "brand", "growth manager",
         "associate, ", "associate -",
+    ]
+    title_lower = title.lower()
+    if any(bad in title_lower for bad in blocklist):
+        return False
+    return any(keyword in title_lower for keyword in keywords)
+
+
+def is_data_science_relevant(title: str) -> bool:
+    """Filters Data Science, Machine Learning, and AI roles."""
+    keywords = [
+        "data scientist", "data engineer", "machine learning", "ml engineer",
+        "ai engineer", "deep learning", "nlp", "research engineer",
+        "research intern", "applied scientist", "computer vision",
+        "generative ai", "llm", "prompt engineer", "data science intern",
+        "ml intern", "ai intern", "data analyst", "business analyst",
+        "analytics manager", "analytics lead"
+    ]
+    blocklist = [
+        "customer support", "customer success", "sales",
+        "human resources", "recruiter", "marketing", "legal",
     ]
     title_lower = title.lower()
     if any(bad in title_lower for bad in blocklist):
@@ -86,7 +100,7 @@ def is_business_relevant(title: str) -> bool:
         "consultant", "management consultant", "management trainee",
         "growth manager", "growth analyst", "marketing analyst",
         "financial analyst", "investment analyst", "corporate finance",
-        "business development", "program manager", "data analyst",
+        "business development", "program manager",
     ]
     blocklist = [
         "customer support", "customer success", "sales representative",
@@ -116,6 +130,8 @@ def is_design_relevant(title: str) -> bool:
 
 def check_job_relevance_and_category(title: str) -> str | None:
     """Classifies job titles into target categories or returns None if not relevant."""
+    if is_data_science_relevant(title):
+        return "data_science"
     if is_relevant(title):
         return "tech"
     if is_business_relevant(title):

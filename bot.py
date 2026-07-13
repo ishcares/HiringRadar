@@ -688,6 +688,8 @@ async def alert_job(context: ContextTypes.DEFAULT_TYPE):
                         InlineKeyboardButton("👍 Relevant", callback_data=f"feedback:relevant:{url_hash}"),
                         InlineKeyboardButton("👎 Not for me", callback_data=f"feedback:skip:{url_hash}"),
                     ])
+                
+                # Send the message
                 await context.bot.send_message(
                     chat_id=student['chat_id'],
                     text=digest,
@@ -695,11 +697,11 @@ async def alert_job(context: ContextTypes.DEFAULT_TYPE):
                     disable_web_page_preview=True,
                     reply_markup=InlineKeyboardMarkup(buttons)
                 )
+                
+                # Mark this chunk's jobs as seen immediately after successful send
+                chunk_urls = [job["url"] for job, _ in chunk_pairs[i]]
+                await asyncio.to_thread(mark_student_seen_jobs, student["chat_id"], chunk_urls)
                 await asyncio.sleep(0.1)
-
-            # Mark sent — student won't see these again
-            sent_urls = [job["url"] for job, _ in unseen]
-            await asyncio.to_thread(mark_student_seen_jobs, student["chat_id"], sent_urls)
 
         except Forbidden:
             # Student blocked the bot — clean up

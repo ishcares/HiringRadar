@@ -325,7 +325,9 @@ def match_jobs_for_student(
     dept = (student.get("department") or "cse").lower()
     
     # Map student departments to jobs_cache categories
-    if dept in ["cse", "it", "cs", "computer science"]:
+    if dept in ["data science", "ds", "machine learning", "ml", "ai", "artificial intelligence"]:
+        target_category = "data_science"
+    elif dept in ["cse", "it", "cs", "computer science"]:
         target_category = "tech"
     elif dept in ["mba", "management", "bba", "business"]:
         target_category = "business"
