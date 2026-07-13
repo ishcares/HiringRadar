@@ -498,15 +498,32 @@ async def jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if label == "matched":
         student_data = res.data[0] if res.data else None
-        lines = [format_job_card(job, grad_year, score, student_data) for job, score in display_jobs[:5]]
+        for job, score in display_jobs[:5]:
+            card = format_job_card(job, grad_year, score, student_data)
+            url_hash = hashlib.md5(job["url"].encode()).hexdigest()[:10]
+            buttons = [
+                [
+                    InlineKeyboardButton("👍 Relevant", callback_data=f"feedback:relevant:{url_hash}"),
+                    InlineKeyboardButton("👎 Not for me", callback_data=f"feedback:skip:{url_hash}"),
+                ],
+                [
+                    InlineKeyboardButton("🤖 Check Resume Match", callback_data=f"feedback:check_match:{url_hash}")
+                ]
+            ]
+            await update.message.reply_text(
+                card,
+                parse_mode="Markdown",
+                disable_web_page_preview=True,
+                reply_markup=InlineKeyboardMarkup(buttons)
+            )
     else:
-        lines = [format_job_card(job, grad_year) for job in display_jobs[:5]]
-
-    await update.message.reply_text(
-        f"*Your {label} job matches:*\n━━━━━━━━━━━━━━━━━━━━━\n\n" + "\n\n".join(lines),
-        parse_mode="Markdown",
-        disable_web_page_preview=True
-    )
+        for job in display_jobs[:5]:
+            card = format_job_card(job, grad_year)
+            await update.message.reply_text(
+                card,
+                parse_mode="Markdown",
+                disable_web_page_preview=True
+            )
 
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
