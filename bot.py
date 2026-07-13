@@ -507,8 +507,7 @@ async def jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     InlineKeyboardButton("👎 Not for me", callback_data=f"feedback:skip:{url_hash}"),
                 ]
             ]
-            admin_chat_id = os.getenv("ADMIN_CHAT_ID")
-            if admin_chat_id and str(chat_id) == str(admin_chat_id):
+            if os.getenv("ENABLE_RESUME_CHECK") == "True":
                 buttons.append([
                     InlineKeyboardButton("🤖 Check Resume Match", callback_data=f"feedback:check_match:{url_hash}")
                 ])
@@ -684,9 +683,11 @@ async def alert_job(context: ContextTypes.DEFAULT_TYPE):
                         InlineKeyboardButton("👍 Relevant", callback_data=f"feedback:relevant:{url_hash}"),
                         InlineKeyboardButton("👎 Not for me", callback_data=f"feedback:skip:{url_hash}"),
                     ])
-                    buttons.append([
-                        InlineKeyboardButton("🤖 Check Resume Match", callback_data=f"feedback:check_match:{url_hash}")
-                    ])
+                    if os.getenv("ENABLE_RESUME_CHECK") == "True":
+                        buttons.append([
+                            InlineKeyboardButton("🤖 Check Resume Match", callback_data=f"feedback:check_match:{url_hash}")
+                        ])
+
                 
                 # Send the message
                 await context.bot.send_message(
@@ -723,9 +724,11 @@ async def alert_job(context: ContextTypes.DEFAULT_TYPE):
                             InlineKeyboardButton("👍 Relevant", callback_data=f"feedback:relevant:{url_hash}"),
                             InlineKeyboardButton("👎 Not for me", callback_data=f"feedback:skip:{url_hash}"),
                         ])
-                        buttons.append([
-                            InlineKeyboardButton("🤖 Check Resume Match", callback_data=f"feedback:check_match:{url_hash}")
-                        ])
+                        if os.getenv("ENABLE_RESUME_CHECK") == "True":
+                            buttons.append([
+                                InlineKeyboardButton("🤖 Check Resume Match", callback_data=f"feedback:check_match:{url_hash}")
+                            ])
+
                     await context.bot.send_message(
                         chat_id=student['chat_id'],
                         text=digest,
