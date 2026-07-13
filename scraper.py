@@ -63,7 +63,8 @@ def is_relevant(title):
         "human resources", "hr ", "recruiter", "talent", "legal",
         "finance", "accounting", "operations manager", "program manager",
         "content", "copywriter", "brand", "growth manager",
-        "associate, ", "associate -",
+        "associate, ", "associate -", "collection", "collections",
+        "lending", "credit officer", "operations", "commercial",
     ]
     title_lower = title.lower()
     if any(bad in title_lower for bad in blocklist):
