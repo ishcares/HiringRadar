@@ -97,12 +97,19 @@ def get_graduation_tag(title: str, grad_year: int) -> str:
     years_to_grad = grad_year - current_year
     exp_tag = get_experience_tag(title)
 
-    # If the role is entry-level (Fresher, Intern, Junior, or General SDE), it is good for anyone
-    if any(x in exp_tag for x in ["Fresher", "Intern", "Junior", "Software Engineer"]):
-        return "✅ Good for you"
-    
-    # Otherwise, it might be a senior role requiring experience
-    return "⚠️ May need experience"
+    if years_to_grad <= 0:
+        # Passouts: SDE-1 / general Software Engineer roles are excellent fits
+        if any(x in exp_tag for x in ["Fresher", "Intern", "Junior", "Software Engineer"]):
+            return "✅ Good for you"
+        return "⚠️ May need experience"
+    else:
+        # Current students (2027+): Only Intern/Trainee roles are immediate fits
+        if any(x in exp_tag for x in ["Fresher", "Intern"]):
+            return "✅ Good for you"
+        # SDE-1 / Software Engineer roles get marked as full-time warning
+        if "Software Engineer" in exp_tag or "Junior" in exp_tag:
+            return "⚠️ May need experience (Full-time)"
+        return "⚠️ Check requirements"
 
 
 def matches_role(title: str, roles: list) -> bool:
