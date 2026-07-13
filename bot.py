@@ -35,8 +35,7 @@ from matching import (
     build_match_reason,
     keyword_map,
 )
-from resume_parser import extract_text_from_pdf
-from ai_agent import parse_skills_from_resume
+
 
 
 load_dotenv()
@@ -70,58 +69,6 @@ def get_time_ago_string(scraped_at_str: str) -> str:
         return "recent"
 
 
-async def handle_resume_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Downloads the uploaded PDF resume, parses its skills, and updates Supabase."""
-    chat_id = update.effective_chat.id
-    document = update.message.document
-    
-    # Verify it is a PDF
-    if not document.file_name.lower().endswith(".pdf"):
-        await update.message.reply_text("❌ Please upload your resume in PDF format.")
-        return
-        
-    await update.message.reply_text("📥 Downloading your resume...")
-    
-    # Download file locally
-    new_file = await context.bot.get_file(document.file_id)
-    local_dir = r"C:\Users\ishit\OneDrive\Desktop\HiringRadar\temp_resumes"
-    os.makedirs(local_dir, exist_ok=True)
-    local_path = os.path.join(local_dir, f"{chat_id}_resume.pdf")
-    await new_file.download_to_drive(local_path)
-    
-    await update.message.reply_text("🔍 Analyzing your resume with Gemini...")
-    
-    try:
-        resume_text = await asyncio.to_thread(extract_text_from_pdf, local_path)
-        skills = await asyncio.to_thread(parse_skills_from_resume, resume_text)
-        
-        if not skills:
-            await update.message.reply_text("⚠️ We couldn't extract any skills. Please type your skills manually.")
-            if os.path.exists(local_path):
-                os.remove(local_path)
-            return
-            
-        # Save to database
-        supabase.table("students").update({
-            "skills": skills
-        }).eq("chat_id", chat_id).execute()
-        
-        # Clean up local file
-        if os.path.exists(local_path):
-            os.remove(local_path)
-            
-        skills_str = ", ".join(skills)
-        await update.message.reply_text(
-            f"✅ *Resume uploaded successfully!*\n\n"
-            f"We identified these skills from your profile:\n`{skills_str}`\n\n"
-            f"Your alert matching is now optimized! 🚀",
-            parse_mode="Markdown"
-        )
-    except Exception as e:
-        print(f"Error handling resume PDF: {e}")
-        await update.message.reply_text("❌ Error processing your resume. Please try typing your skills manually.")
-        if os.path.exists(local_path):
-            os.remove(local_path)
 
 
 def format_job_card(job: dict, grad_year: int = 2026, score: float = 0.0, student: dict = None) -> str:
@@ -418,6 +365,25 @@ async def get_job_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Couldn't save profile right now. Try /start again.")
         return ConversationHandler.END
 
+    # Run an immediate match check to give them instant feedback
+    from db import get_cached_jobs
+    from matching import match_jobs_for_student
+    
+    student_dict = {
+        "skills": data["skills"],
+        "preferred_roles": data["preferred_roles"],
+        "job_type": data["job_type"],
+        "department": data.get("department", "cse")
+    }
+    
+    active_jobs = get_cached_jobs()
+    matches = match_jobs_for_student(student_dict, active_jobs)
+    
+    if matches:
+        status_msg = "We found matching jobs for you! Your first alert cards will arrive in your chat in a couple of minutes. 🚀"
+    else:
+        status_msg = "🔍 *HiringRadar is on the hunt:*\nWe couldn't find an exact skill match for you in today's active placements, but our scrapers are checking new career pages every 5 minutes. We'll alert you the moment a fit goes live! 📡"
+
     dept_names = {"cse": "CSE/IT", "mba": "MBA/Business", "design": "Design", "other": "Other"}
     dept_label = dept_names.get(data.get('department'), 'Other')
     await update.message.reply_text(
@@ -427,7 +393,7 @@ async def get_job_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"💻 Skills: {', '.join(data['skills'])}\n"
         f"🎯 Roles: {', '.join(data['preferred_roles'])}\n"
         f"💼 Looking for: {data['job_type']}\n\n"
-        f"You'll now get *personalized* job alerts! 🚀",
+        f"{status_msg}",
         parse_mode="Markdown"
     )
     return ConversationHandler.END
@@ -1041,7 +1007,6 @@ def create_app(token):
             BRANCH:     [MessageHandler(filters.TEXT & ~filters.COMMAND, get_branch)],
             GRAD_YEAR:  [MessageHandler(filters.TEXT & ~filters.COMMAND, get_grad_year)],
             SKILLS:     [
-                MessageHandler(filters.Document.PDF, handle_resume_pdf),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_skills)
             ],
             ROLES:      [MessageHandler(filters.TEXT & ~filters.COMMAND, get_roles)],
@@ -1064,7 +1029,6 @@ def create_app(token):
     )
 
     app.add_handler(conv_handler)
-    app.add_handler(MessageHandler(filters.Document.PDF, handle_resume_pdf))
     app.add_handler(CommandHandler("profile", profile))
     app.add_handler(CommandHandler("share", share))
     app.add_handler(CommandHandler("broadcast", broadcast))
