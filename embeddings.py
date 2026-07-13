@@ -14,24 +14,22 @@ def calculate_cosine_similarity(v1: list, v2: list) -> float:
 
 
 def get_embeddings_from_gemini(texts: list) -> list:
-    """Gets text embeddings from the Google Gemini API."""
+    """Gets text embeddings from the Google Gemini API using the new google-genai SDK."""
     gemini_key = os.getenv("GEMINI_API_KEY")
     if not gemini_key:
         return []
     try:
-        import google.generativeai as genai
-        genai.configure(api_key=gemini_key)
-        response = genai.embed_content(
-            model="models/text-embedding-004",
-            contents=texts,
-            task_type="retrieval_document"
+        from google import genai
+        client = genai.Client(api_key=gemini_key)
+        response = client.models.embed_content(
+            model="text-embedding-004",
+            contents=texts
         )
-        # Gemini returns a list of floats (for single text) or list of lists (for multiple)
-        embeddings = response.get('embedding', [])
-        # If single text, wrap it in a list to match HF list-of-vectors format
-        if len(texts) == 1 and embeddings and isinstance(embeddings[0], float):
-            return [embeddings]
-        return embeddings
+        # Extract the float values for each embedding
+        if response.embeddings:
+            embeddings = [e.values for e in response.embeddings]
+            return embeddings
+        return []
     except Exception as e:
         print(f"Failed to fetch embeddings from Gemini API: {e}")
         return []
