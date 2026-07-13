@@ -72,23 +72,23 @@ def get_time_ago_string(scraped_at_str: str) -> str:
 
 
 def format_job_card(job: dict, grad_year: int = 2026, score: float = 0.0, student: dict = None) -> str:
-    """Sleek, minimal placement card formatting."""
+    """Sleek, premium placement card formatting."""
     exp = get_experience_tag(job['title'])
     grad = get_graduation_tag(job['title'], grad_year)
-    time_ago = get_time_ago_string(job.get('scraped_at'))
-    details = f"{job['location']} · {exp} ({grad}) · {time_ago}"
     
     score_line = ""
     if score > 0:
         pct = round(score * 100)
         reason = build_match_reason(job, student)
-        score_line = f"🎯 {pct}% Match — _{reason}_\n"
+        score_line = f"🎯 *Match Fit:* {pct}% (_{reason}_)\n"
 
     return (
-        f"*{job['company']}* — {job['title']}\n"
-        f"📍 {details}\n\n"
+        f"🏢 *Company:* {job['company']}\n"
+        f"💼 *Role:* {job['title']}\n"
+        f"📍 *Location:* {job['location']}\n"
+        f"🌱 *Type:* {exp} ({grad})\n"
         f"{score_line}"
-        f"[Apply Now]({job['url']})"
+        f"🔗 [Apply Directly here]({job['url']})\n"
     )
 
 
@@ -503,6 +503,10 @@ async def jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    admin_chat_id = os.getenv("ADMIN_CHAT_ID")
+    if str(update.effective_chat.id) != str(admin_chat_id):
+        # Silently ignore or pretend command does not exist
+        return
     count = count_subscribers()
     await update.message.reply_text(f"🎯 HiringRadar is actively tracking roles for {count} candidates.")
 
@@ -985,7 +989,6 @@ async def on_startup(app):
         BotCommand("experience", "Update job type preference"),
         BotCommand("pause",      "Pause job alerts"),
         BotCommand("resume",     "Resume job alerts"),
-        BotCommand("stats",      "See active user count"),
         BotCommand("start",      "Set up or restart your profile"),
     ])
 
@@ -1020,7 +1023,6 @@ def create_app(token):
         fallbacks=[
             CommandHandler("cancel", cancel),
             CommandHandler("start", start),
-            CommandHandler("stats", stats),
             CommandHandler("profile", profile),
             CommandHandler("jobs", jobs),
         ],
