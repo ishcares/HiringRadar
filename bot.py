@@ -1013,12 +1013,18 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
     _, action, student_chat_id_str, url_hash = query.data.split(":", 3)
     student_chat_id = int(student_chat_id_str)
     
-    report_key = f"pending_report:{student_chat_id}:{url_hash}"
-    report_text = context.bot_data.get(report_key)
-    
+    # Fetch report from Supabase matching_queue
+    report_text = None
+    try:
+        q_res = supabase.table("matching_queue").select("generated_report").eq("chat_id", student_chat_id).execute()
+        if q_res.data:
+            report_text = q_res.data[0].get("generated_report")
+    except Exception as db_fetch_err:
+        print(f"Failed to fetch report from DB: {db_fetch_err}")
+        
     if action == "approve":
         if not report_text:
-            await query.edit_message_text("⚠️ Report not found in active memory cache (may have expired).")
+            await query.edit_message_text("⚠️ Report not found in Supabase matching_queue (may have been cleared).")
             return
             
         try:
@@ -1038,9 +1044,6 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
             # 2. Update queue status in Supabase
             supabase.table("matching_queue").update({"status": "completed"}).eq("chat_id", student_chat_id).execute()
             
-            # 3. Clean up cache
-            context.bot_data.pop(report_key, None)
-            
             await query.edit_message_text(f"✅ *Report successfully sent to Candidate {student_chat_id}!*", parse_mode="Markdown")
         except Exception as e:
             print(f"Failed to send approved report to candidate: {e}")
@@ -1050,7 +1053,6 @@ async def admin_callback_handler(update: Update, context: ContextTypes.DEFAULT_T
         try:
             # Remove from queue
             supabase.table("matching_queue").delete().eq("chat_id", student_chat_id).execute()
-            context.bot_data.pop(report_key, None)
             await query.edit_message_text("❌ *Report rejected and cleared from queue.*", parse_mode="Markdown")
         except Exception as e:
             print(f"Failed to clear queue for reject: {e}")
@@ -1172,8 +1174,13 @@ async def handle_wizard_resume_pdf(update: Update, context: ContextTypes.DEFAULT
             evaluate_resume_for_job, resume_text, job_title, job_company, job_description
         )
         
-        # Save generated report to session memory so admin can approve it
-        context.bot_data[f"pending_report:{chat_id}:{url_hash}"] = evaluation_text
+        # Save generated report directly to Supabase matching_queue
+        try:
+            supabase.table("matching_queue").update({
+                "generated_report": evaluation_text
+            }).eq("chat_id", chat_id).execute()
+        except Exception as db_report_err:
+            print(f"Failed to save report to Supabase matching_queue: {db_report_err}")
         
         # 5. Notify Admin with generated evaluation and action buttons
         if admin_chat_id:
