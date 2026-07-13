@@ -77,6 +77,14 @@ def format_job_card(job: dict, grad_year: int = 2026, score: float = 0.0, studen
     grad = get_graduation_tag(job['title'], grad_year)
     time_ago = get_time_ago_string(job.get('scraped_at'))
     
+    # Calculate eligible batches based on seniority tag
+    if "Fresher" in exp or "Intern" in exp:
+        batch_line = "🎓 *Eligible Batch:* Class of 2026 / 2027 (Internships)\n"
+    elif "Junior" in exp or "Software Engineer" in exp:
+        batch_line = "🎓 *Eligible Batch:* Class of 2026 & passouts (Full-Time)\n"
+    else:
+        batch_line = "🎓 *Eligible Batch:* Class of 2025 & earlier (Requires experience)\n"
+        
     score_line = ""
     if score > 0:
         pct = round(score * 100)
@@ -88,6 +96,7 @@ def format_job_card(job: dict, grad_year: int = 2026, score: float = 0.0, studen
         f"💼 *Role:* {job['title']}\n"
         f"📍 *Location:* {job['location']}\n"
         f"🌱 *Type:* {exp} ({grad})\n"
+        f"{batch_line}"
         f"📅 *Posted:* {time_ago}\n"
         f"{score_line}"
         f"🔗 [Apply Directly here]({job['url']})\n"
