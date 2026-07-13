@@ -97,18 +97,12 @@ def get_graduation_tag(title: str, grad_year: int) -> str:
     years_to_grad = grad_year - current_year
     exp_tag = get_experience_tag(title)
 
-    if years_to_grad <= 0:
-        if any(x in exp_tag for x in ["Fresher", "Intern", "Junior", "Software Engineer"]):
-            return "✅ Good for you"
-        return "⚠️ May need experience"
-    elif years_to_grad == 1:
-        if any(x in exp_tag for x in ["Fresher", "Intern"]):
-            return "✅ Good for you"
-        return "⚠️ May need experience"
-    else:
-        if "Intern" in exp_tag:
-            return "✅ Good for you"
-        return "⚠️ Check requirements"
+    # If the role is entry-level (Fresher, Intern, Junior, or General SDE), it is good for anyone
+    if any(x in exp_tag for x in ["Fresher", "Intern", "Junior", "Software Engineer"]):
+        return "✅ Good for you"
+    
+    # Otherwise, it might be a senior role requiring experience
+    return "⚠️ May need experience"
 
 
 def matches_role(title: str, roles: list) -> bool:

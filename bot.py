@@ -505,11 +505,13 @@ async def jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 [
                     InlineKeyboardButton("👍 Relevant", callback_data=f"feedback:relevant:{url_hash}"),
                     InlineKeyboardButton("👎 Not for me", callback_data=f"feedback:skip:{url_hash}"),
-                ],
-                [
-                    InlineKeyboardButton("🤖 Check Resume Match", callback_data=f"feedback:check_match:{url_hash}")
                 ]
             ]
+            admin_chat_id = os.getenv("ADMIN_CHAT_ID")
+            if admin_chat_id and str(chat_id) == str(admin_chat_id):
+                buttons.append([
+                    InlineKeyboardButton("🤖 Check Resume Match", callback_data=f"feedback:check_match:{url_hash}")
+                ])
             await update.message.reply_text(
                 card,
                 parse_mode="Markdown",
