@@ -35,6 +35,9 @@ from matching import (
     build_match_reason,
     keyword_map,
 )
+from resume_parser import extract_text_from_pdf
+from ai_agent import parse_skills_from_resume
+
 
 load_dotenv()
 
@@ -65,6 +68,60 @@ def get_time_ago_string(scraped_at_str: str) -> str:
             return f"{days}d ago"
     except Exception:
         return "recent"
+
+
+async def handle_resume_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Downloads the uploaded PDF resume, parses its skills, and updates Supabase."""
+    chat_id = update.effective_chat.id
+    document = update.message.document
+    
+    # Verify it is a PDF
+    if not document.file_name.lower().endswith(".pdf"):
+        await update.message.reply_text("❌ Please upload your resume in PDF format.")
+        return
+        
+    await update.message.reply_text("📥 Downloading your resume...")
+    
+    # Download file locally
+    new_file = await context.bot.get_file(document.file_id)
+    local_dir = r"C:\Users\ishit\OneDrive\Desktop\HiringRadar\temp_resumes"
+    os.makedirs(local_dir, exist_ok=True)
+    local_path = os.path.join(local_dir, f"{chat_id}_resume.pdf")
+    await new_file.download_to_drive(local_path)
+    
+    await update.message.reply_text("🔍 Analyzing your resume with Gemini...")
+    
+    try:
+        resume_text = await asyncio.to_thread(extract_text_from_pdf, local_path)
+        skills = await asyncio.to_thread(parse_skills_from_resume, resume_text)
+        
+        if not skills:
+            await update.message.reply_text("⚠️ We couldn't extract any skills. Please type your skills manually.")
+            if os.path.exists(local_path):
+                os.remove(local_path)
+            return
+            
+        # Save to database
+        supabase.table("students").update({
+            "skills": skills
+        }).eq("chat_id", chat_id).execute()
+        
+        # Clean up local file
+        if os.path.exists(local_path):
+            os.remove(local_path)
+            
+        skills_str = ", ".join(skills)
+        await update.message.reply_text(
+            f"✅ *Resume uploaded successfully!*\n\n"
+            f"We identified these skills from your profile:\n`{skills_str}`\n\n"
+            f"Your alert matching is now optimized! 🚀",
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        print(f"Error handling resume PDF: {e}")
+        await update.message.reply_text("❌ Error processing your resume. Please try typing your skills manually.")
+        if os.path.exists(local_path):
+            os.remove(local_path)
 
 
 def format_job_card(job: dict, grad_year: int = 2026, score: float = 0.0, student: dict = None) -> str:
@@ -145,10 +202,13 @@ async def get_edit_college(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("🖥️ CSE/IT", callback_data="edept:cse"),
-            InlineKeyboardButton("📊 MBA/Business", callback_data="edept:mba"),
+            InlineKeyboardButton("📈 Data Science / AI", callback_data="edept:data_science"),
         ],
         [
+            InlineKeyboardButton("📊 MBA/Business", callback_data="edept:mba"),
             InlineKeyboardButton("🎨 Design", callback_data="edept:design"),
+        ],
+        [
             InlineKeyboardButton("Other", callback_data="edept:other"),
         ]
     ]
@@ -179,8 +239,8 @@ async def get_edit_department(update: Update, context: ContextTypes.DEFAULT_TYPE
             "department": dept_val,
         }).eq("chat_id", chat_id).execute()
         
-        dept_names = {"cse": "CSE/IT", "mba": "MBA/Business", "design": "Design", "other": "Other"}
-        dept_label = dept_names.get(dept_val, 'Other')
+        dept_names = {"cse": "CSE/IT", "data_science": "Data Science / AI", "mba": "MBA/Business", "design": "Design", "other": "Other"}
+        dept_label = dept_names.get(dept_val, dept_val)
         
         msg_text = (
             f"✅ *Profile updated successfully!*\n\n"
@@ -210,10 +270,13 @@ async def get_college(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [
             InlineKeyboardButton("🖥️ CSE/IT", callback_data="dept:cse"),
-            InlineKeyboardButton("📊 MBA/Business", callback_data="dept:mba"),
+            InlineKeyboardButton("📈 Data Science / AI", callback_data="dept:data_science"),
         ],
         [
+            InlineKeyboardButton("📊 MBA/Business", callback_data="dept:mba"),
             InlineKeyboardButton("🎨 Design", callback_data="dept:design"),
+        ],
+        [
             InlineKeyboardButton("Other", callback_data="dept:other"),
         ]
     ]
@@ -233,7 +296,7 @@ async def get_department(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['department'] = dept_val
         
         # Guide them to provide specific branch
-        dept_names = {"cse": "CSE/IT", "mba": "MBA/Business", "design": "Design", "other": "Other"}
+        dept_names = {"cse": "CSE/IT", "data_science": "Data Science / AI", "mba": "MBA/Business", "design": "Design", "other": "Other"}
         await query.message.reply_text(
             f"Selected: *{dept_names.get(dept_val, dept_val)}*\n\n"
             f"📚 *What is your specific branch?*\n\ne.g. Computer Science, Finance, UX Design",
@@ -911,6 +974,36 @@ async def checkin_callback_handler(update: Update, context: ContextTypes.DEFAULT
         await query.message.reply_text("⚠️ Something went wrong saving your response. Send /start to update your profile.")
 
 
+async def forward_to_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Forwards any user message to the admin for manual response."""
+    admin_chat_id = os.getenv("ADMIN_CHAT_ID")
+    if not admin_chat_id:
+        return
+        
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+    text = update.message.text
+    
+    # Don't forward messages sent by the admin themselves!
+    if str(chat_id) == str(admin_chat_id):
+        return
+        
+    forward_text = (
+        f"📬 *New message from {user.first_name} (@{user.username or 'none'})*\n"
+        f"Chat ID: `{chat_id}`\n"
+        f"Message:\n\n{text}"
+    )
+    
+    try:
+        await context.bot.send_message(
+            chat_id=int(admin_chat_id),
+            text=forward_text,
+            parse_mode="Markdown"
+        )
+    except Exception as e:
+        print(f"Failed to forward message to admin: {e}")
+
+
 # ── Main ───────────────────────────────────────────────────────────────────
 
 async def on_startup(app):
@@ -945,7 +1038,10 @@ def create_app(token):
             ],
             BRANCH:     [MessageHandler(filters.TEXT & ~filters.COMMAND, get_branch)],
             GRAD_YEAR:  [MessageHandler(filters.TEXT & ~filters.COMMAND, get_grad_year)],
-            SKILLS:     [MessageHandler(filters.TEXT & ~filters.COMMAND, get_skills)],
+            SKILLS:     [
+                MessageHandler(filters.Document.PDF, handle_resume_pdf),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, get_skills)
+            ],
             ROLES:      [MessageHandler(filters.TEXT & ~filters.COMMAND, get_roles)],
             JOB_TYPE:   [MessageHandler(filters.TEXT & ~filters.COMMAND, get_job_type)],
             EDIT_COLLEGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_edit_college)],
@@ -966,6 +1062,7 @@ def create_app(token):
     )
 
     app.add_handler(conv_handler)
+    app.add_handler(MessageHandler(filters.Document.PDF, handle_resume_pdf))
     app.add_handler(CommandHandler("profile", profile))
     app.add_handler(CommandHandler("share", share))
     app.add_handler(CommandHandler("broadcast", broadcast))
@@ -978,6 +1075,7 @@ def create_app(token):
     app.add_handler(CommandHandler("resume", resume_alerts))
     app.add_handler(CallbackQueryHandler(feedback_handler, pattern="^feedback:"))
     app.add_handler(CallbackQueryHandler(checkin_callback_handler, pattern="^checkin:"))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, forward_to_admin))
 
     # ── Two separate scheduled jobs ─────────────────────────────────────────
     # scrape_job: every 5 min — hits ATS APIs, writes to jobs_cache
