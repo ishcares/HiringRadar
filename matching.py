@@ -350,6 +350,17 @@ def match_jobs_for_student(
         # Filter jobs by category, keeping fallback jobs with matching category
         jobs = [j for j in jobs if j.get("category") == target_category]
 
+    # Filter by preferred locations if configured
+    pref_locs = student.get("preferred_locations") or []
+    if pref_locs and not any(loc.lower().strip() == "any" for loc in pref_locs):
+        filtered_by_loc = []
+        for j in jobs:
+            job_loc = j.get("location", "").lower()
+            # If any preferred city matches a substring in the job location, keep it
+            if any(str(loc).lower().strip() in job_loc for loc in pref_locs):
+                filtered_by_loc.append(j)
+        jobs = filtered_by_loc
+
     jobs = filter_by_job_type(jobs, student.get("job_type", "both"))
     roles = student.get("preferred_roles") or []
     jobs = [j for j in jobs if matches_role(j["title"], roles)]

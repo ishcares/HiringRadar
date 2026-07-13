@@ -414,18 +414,23 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     s = res.data[0]
     paused_status = "⏸️ Paused" if s.get("paused") else "🟢 Active"
+    locs = s.get("preferred_locations") or []
+    locs_str = ", ".join(locs).title() if locs else "Any Location"
+    
     await update.message.reply_text(
         f"👤 *Your Profile*\n\n"
         f"🙋 Name: {s['name']}\n"
         f"🎓 Branch: {s['branch']} | {s['graduation_year']}\n"
         f"💻 Skills: {', '.join(s['skills'] or [])}\n"
         f"🎯 Roles: {', '.join(s['preferred_roles'] or [])}\n"
+        f"📍 Locations: {locs_str}\n"
         f"💼 Job type: {s['job_type']}\n"
         f"🔔 Alerts: {paused_status}\n\n"
         f"━━━━━━━━━━━━━━━━━━━━━\n"
         f"✏️ *Update your profile:*\n"
         f"`/skills` Python, ML, SQL\n"
         f"`/roles` backend, ml\n"
+        f"`/locations` Pune, Mumbai\n"
         f"`/experience` internship\n"
         f"`/pause` · `/resume` alerts",
         parse_mode="Markdown"
@@ -863,6 +868,21 @@ async def update_experience(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ Looking for: {job_type}")
 
 
+async def update_locations(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    if not context.args:
+        await update.message.reply_text(
+            "Usage: `/locations Pune, Mumbai, Remote`\n"
+            "Or type `/locations Any` to clear filters and see jobs from all locations.",
+            parse_mode="Markdown"
+        )
+        return
+    locations = [loc.strip().lower() for loc in " ".join(context.args).split(",")]
+    supabase.table("students").update({"preferred_locations": locations}).eq("chat_id", chat_id).execute()
+    display_locs = ", ".join(locations).title()
+    await update.message.reply_text(f"✅ *Preferred locations updated:* `{display_locs}`", parse_mode="Markdown")
+
+
 async def pause_alerts(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     supabase.table("students").update({"paused": True}).eq("chat_id", chat_id).execute()
@@ -1182,6 +1202,7 @@ async def on_startup(app):
         BotCommand("share",      "Invite friends & get Premium Alerts 🎁"),
         BotCommand("skills",     "Update your skills"),
         BotCommand("roles",      "Update preferred roles"),
+        BotCommand("locations",  "Update preferred locations"),
         BotCommand("experience", "Update job type preference"),
         BotCommand("pause",      "Pause job alerts"),
         BotCommand("resume",     "Resume job alerts"),
@@ -1234,6 +1255,7 @@ def create_app(token):
     app.add_handler(CommandHandler("stats", stats))
     app.add_handler(CommandHandler("skills", update_skills))
     app.add_handler(CommandHandler("roles", update_roles))
+    app.add_handler(CommandHandler("locations", update_locations))
     app.add_handler(CommandHandler("experience", update_experience))
     app.add_handler(CommandHandler("pause", pause_alerts))
     app.add_handler(CommandHandler("resume", resume_alerts))
