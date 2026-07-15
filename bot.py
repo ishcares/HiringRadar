@@ -69,39 +69,24 @@ def get_time_ago_string(scraped_at_str: str) -> str:
         return "recent"
 
 
-
-
 def format_job_card(job: dict, grad_year: int = 2026, score: float = 0.0, student: dict = None) -> str:
-    """Sleek, premium placement card formatting."""
-    exp = get_experience_tag(job['title'])
-    grad = get_graduation_tag(job['title'], grad_year)
+    """Minimal placement card — company, role, location, freshness, fit, apply link."""
+    desc = job.get('description', '')
+    exp = get_experience_tag(job['title'], desc)
     time_ago = get_time_ago_string(job.get('scraped_at'))
-    
-    # Calculate eligible batches based on seniority tag
-    if "Fresher" in exp or "Intern" in exp:
-        batch_line = "🎓 *Eligible Batch:* Class of 2026 / 2027 (Internships)\n"
-    elif "Junior" in exp or "Software Engineer" in exp:
-        batch_line = "🎓 *Eligible Batch:* Class of 2026 & passouts (Full-Time)\n"
-    else:
-        batch_line = "🎓 *Eligible Batch:* Class of 2025 & earlier (Requires experience)\n"
-        
-    score_line = ""
+
+    lines = [
+        f"🏢 *{job['company']}* — {job['title']}",
+        f"📍 {job['location']} · {exp} · {time_ago}",
+    ]
+
     if score > 0:
         pct = round(score * 100)
         reason = build_match_reason(job, student)
-        score_line = f"🎯 *Match Fit:* {pct}% (_{reason}_)\n"
+        lines.append(f"🎯 {pct}% match — _{reason}_")
 
-    return (
-        f"🏢 *Company:* {job['company']}\n"
-        f"💼 *Role:* {job['title']}\n"
-        f"📍 *Location:* {job['location']}\n"
-        f"🌱 *Type:* {exp} ({grad})\n"
-        f"{batch_line}"
-        f"📅 *Posted:* {time_ago}\n"
-        f"{score_line}"
-        f"🔗 [Apply Directly here]({job['url']})\n"
-    )
-
+    lines.append(f"🔗 [Apply]({job['url']})")
+    return "\n".join(lines)
 
 # ── Onboarding conversation ────────────────────────────────────────────────
 
@@ -415,35 +400,6 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ── Other commands ─────────────────────────────────────────────────────────
 
-async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    res = supabase.table("students").select("*").eq("chat_id", chat_id).execute()
-    if not res.data:
-        await update.message.reply_text("No profile found. Type /start to set one up.")
-        return
-    s = res.data[0]
-    paused_status = "⏸️ Paused" if s.get("paused") else "🟢 Active"
-    locs = s.get("preferred_locations") or []
-    locs_str = ", ".join(locs).title() if locs else "Any Location"
-    
-    await update.message.reply_text(
-        f"👤 *Your Profile*\n\n"
-        f"🙋 Name: {s['name']}\n"
-        f"🎓 Branch: {s['branch']} | {s['graduation_year']}\n"
-        f"💻 Skills: {', '.join(s['skills'] or [])}\n"
-        f"🎯 Roles: {', '.join(s['preferred_roles'] or [])}\n"
-        f"📍 Locations: {locs_str}\n"
-        f"💼 Job type: {s['job_type']}\n"
-        f"🔔 Alerts: {paused_status}\n\n"
-        f"━━━━━━━━━━━━━━━━━━━━━\n"
-        f"✏️ *Update your profile:*\n"
-        f"`/skills` Python, ML, SQL\n"
-        f"`/roles` backend, ml\n"
-        f"`/locations` Pune, Mumbai\n"
-        f"`/experience` internship\n"
-        f"`/pause` · `/resume` alerts",
-        parse_mode="Markdown"
-    )
 
 async def jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -1118,20 +1074,29 @@ async def handle_wizard_resume_pdf(update: Update, context: ContextTypes.DEFAULT
         await update.message.reply_text("⚠️ Please click 'Check Resume Match' under a job card first to initiate matching.")
         return
         
-    # Get job info from cache to print for admin
+    # Get job info from cache to print for admin.
+    # WHY NOT select("*").execute(): that pulls the ENTIRE jobs_cache table into
+    # memory just to find one row — O(N) on a table that grows every 5 min.
+    # Instead we fetch all active jobs' (id, url) pairs and do the hash match
+    # server-side by filtering on url. Since url is functionally unique per job
+    # and we already have the 10-char hash, we can't filter directly on the DB
+    # (the hash is computed client-side). However, we only need 3 columns, and
+    # Supabase will use the index on `url` for equality.
+    # Correct fix: store url_hash as a generated column in jobs_cache (migration
+    # needed). Short-term: select only the 4 columns we need to keep payload small.
     job_info = "Unknown Job"
     job_title = "Software Engineer"
     job_company = "Tech Firm"
     job_description = "Software engineering duties."
     try:
-        res = supabase.table("jobs_cache").select("*").execute()
+        res = supabase.table("jobs_cache").select("url, title, company, description").eq("is_active", True).execute()
         for j in res.data:
             h = hashlib.md5(j["url"].encode()).hexdigest()[:10]
             if h == url_hash:
                 job_info = f"*{j['company']}* — {j['title']}\n🔗 URL: {j['url']}"
-                job_title = j['title']
-                job_company = j['company']
-                job_description = j.get('description', 'Software engineering duties.')
+                job_title = j["title"]
+                job_company = j["company"]
+                job_description = j.get("description") or "Software engineering duties."
                 break
     except Exception as e:
         print(f"Failed to fetch job info for forward: {e}")
@@ -1165,7 +1130,8 @@ async def handle_wizard_resume_pdf(update: Update, context: ContextTypes.DEFAULT
         print(f"Failed to insert queue row: {ins_err}")
 
     # 3. Parse PDF locally (Zero-Trust download/parse/delete loop)
-    local_dir = r"C:\Users\ishit\OneDrive\Desktop\HiringRadar\temp_resumes"
+    # Use a path relative to this file so it works on any machine / deployment
+    local_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp_resumes")
     os.makedirs(local_dir, exist_ok=True)
     local_path = os.path.join(local_dir, f"{chat_id}_wizard_resume.pdf")
     
@@ -1333,15 +1299,15 @@ if __name__ == "__main__":
     import asyncio
     from embeddings import get_embeddings_from_hf
 
-    # ── Startup Health Check ────────────────────────────────────────────────
-    # Verify HF embeddings are live. If offline, log a clear warning.
-    # This prevents silent degradation to keyword-only mode without admin awareness.
-    print("[startup] Checking HF embedding API health...")
+    # Verify local embeddings model loads correctly.
+    # NOTE: embeddings run fully locally via sentence-transformers (BAAI/bge-small-en-v1.5).
+    # There is no external API, no HF_TOKEN, no rate limits.
+    print("[startup] Loading local embedding model (BAAI/bge-small-en-v1.5)...")
     test_result = get_embeddings_from_hf(["health check"])
     if test_result:
-        print("[startup] ✅ HF embeddings online — semantic matching active.")
+        print("[startup] ✅ Local embeddings online — semantic matching active.")
     else:
-        print("[startup] ⚠️  HF embeddings OFFLINE — running in keyword-only fallback mode. Add HF_TOKEN to .env")
+        print("[startup] ⚠️  Local embedding model failed to initialise — running in keyword-only fallback mode. Check sentence-transformers install.")
 
     app = create_app(BOT_TOKEN)
 

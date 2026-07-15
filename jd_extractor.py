@@ -1,15 +1,16 @@
 import os
 import json
-import google.generativeai as genai
+from google import genai
 from dotenv import load_dotenv
 
 # Ensure environment variables are loaded
 load_dotenv()
 
-# Configure Gemini
+# Configure Gemini Client
 gemini_key = os.getenv("GEMINI_API_KEY")
+client = None
 if gemini_key:
-    genai.configure(api_key=gemini_key)
+    client = genai.Client(api_key=gemini_key)
 
 
 def extract_structured_requirements(job_title: str, company: str, job_description: str) -> dict:
@@ -17,7 +18,7 @@ def extract_structured_requirements(job_title: str, company: str, job_descriptio
     
     Done ONCE per job at scraper ingestion time.
     """
-    if not gemini_key:
+    if not client:
         # Fallback empty structure
         return {
             "role_level": "fresher",
@@ -64,8 +65,10 @@ Output a raw JSON object (strictly no markdown backticks, just raw json) with th
 """
 
     try:
-        model = genai.GenerativeModel("gemini-1.5-flash")
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model='gemini-3.5-flash',
+            contents=prompt,
+        )
         text = response.text.strip()
         
         # Clean markdown code block markers

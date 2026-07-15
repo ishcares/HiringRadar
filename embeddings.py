@@ -1,6 +1,8 @@
 import os
 import math
-import requests
+from sentence_transformers import SentenceTransformer
+
+_model = SentenceTransformer("BAAI/bge-small-en-v1.5")
 
 
 def calculate_cosine_similarity(v1: list, v2: list) -> float:
@@ -13,52 +15,9 @@ def calculate_cosine_similarity(v1: list, v2: list) -> float:
     return dot_product / (magnitude1 * magnitude2)
 
 
-def get_embeddings_from_gemini(texts: list) -> list:
-    """Gets text embeddings from the Google Gemini API using the new google-genai SDK."""
-    gemini_key = os.getenv("GEMINI_API_KEY")
-    if not gemini_key:
-        return []
-    try:
-        from google import genai
-        client = genai.Client(api_key=gemini_key)
-        response = client.models.embed_content(
-            model="text-embedding-004",
-            contents=texts
-        )
-        # Extract the float values for each embedding
-        if response.embeddings:
-            embeddings = [e.values for e in response.embeddings]
-            return embeddings
-        return []
-    except Exception as e:
-        print(f"Failed to fetch embeddings from Gemini API: {e}")
-        return []
-
-
 def get_embeddings_from_hf(texts: list) -> list:
-    """Gets text embeddings from Hugging Face Inference API."""
-    # Attempt Gemini first for stability
-    gemini_embs = get_embeddings_from_gemini(texts)
-    if gemini_embs:
-        return gemini_embs
-
-    api_url = "https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2"
-    headers = {}
-    hf_token = os.getenv("HF_TOKEN")
-    if hf_token:
-        headers["Authorization"] = f"Bearer {hf_token}"
-
-    try:
-        # Shorter timeout (5s) to prevent bot hanging, but wait for model load if cold
-        payload = {
-            "inputs": texts,
-            "options": {"wait_for_model": True}
-        }
-        response = requests.post(api_url, headers=headers, json=payload, timeout=5)
-        if response.status_code == 200:
-            return response.json()
-        print(f"HF API error: {response.status_code} - {response.text}")
-    except Exception as e:
-        print(f"Failed to fetch embeddings from HF API: {e}")
-    return []
-
+    """Local sentence-transformer embeddings — no network calls, no rate limits,
+    no risk of dimension mismatch between providers."""
+    if not texts:
+        return []
+    return _model.encode(texts).tolist()

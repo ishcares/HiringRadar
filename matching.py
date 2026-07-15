@@ -2,7 +2,6 @@ import logging
 import os
 import re
 from datetime import datetime
-from functools import lru_cache
 
 from embeddings import calculate_cosine_similarity, get_embeddings_from_hf
 
@@ -18,8 +17,19 @@ INTERN_BONUS    = float(os.getenv("INTERN_BONUS",    "0.05"))
 # ---------------------------------------------------------------------------
 # In-process embedding cache — keyed on (title, company) tuple
 # Avoids re-embedding the same job titles on every 5-min alert cycle.
+# NOTE: unbounded for now — fine at 7-company scale, revisit before scaling up.
 # ---------------------------------------------------------------------------
 _EMBED_CACHE: dict[tuple, list[float]] = {}
+
+# Fallback display values used ONLY when the HF embedding API is unavailable
+# and we fall back to keyword-only scoring. Keyed on the exact bonus-sum
+# values produced by _keyword_fallback_scores, so they never collide with
+# real cosine-similarity scores.
+_FALLBACK_DISPLAY_MAP = {
+    round(ROLE_BONUS + INTERN_BONUS, 2): 0.90,  # role + intern match
+    round(ROLE_BONUS, 2):                0.80,  # role match only
+    round(INTERN_BONUS, 2):              0.65,  # intern match only
+}
 
 
 keyword_map = {
@@ -36,14 +46,14 @@ keyword_map = {
     "fullstack": ["fullstack", "full stack", "full-stack", "software engineer", "software developer", "sde"],
     "android":   ["android", "kotlin"],
     "ios":       ["ios", "swift"],
-    
+
     # MBA / Business Roles
     "pm":        ["product manager", "apm", "associate product manager", "associate pm", "product management", "product intern", "product analyst"],
     "analyst":   ["business analyst", "operations analyst", "strategy analyst", "program analyst", "analyst"],
     "consulting":["consultant", "consulting", "management trainee", "management consultant"],
     "growth":    ["growth", "growth hacker", "growth manager", "marketing analyst", "marketing manager"],
     "finance":   ["finance", "financial analyst", "investment analyst", "corporate finance", "treasury analyst"],
-    
+
     # Design Roles
     "design":    ["design", "ux", "ui designer", "product design", "figma", "interaction designer", "visual designer"],
 }
@@ -71,9 +81,25 @@ def group_jobs(jobs):
     return list(seen.values())
 
 
-def get_experience_tag(title):
+def get_experience_tag(title: str, description: str = "") -> str:
+    # First check description for explicit experience year requirements (e.g., 2-5 years, 3+ years)
+    # NOTE: description can be None when loaded from Supabase (NULL != empty string).
+    # Use `or ""` — not a default arg — to guard against this at the call site.
+    desc_lower = (description or "").lower()
+    if desc_lower:
+        exp_match = re.search(r"(\b\d+)(?:-\d+)?\+?\s*(?:years?|yrs?)\b\s*(?:of\s*)?\s*(?:experience|software|work|product)", desc_lower)
+        if exp_match:
+            try:
+                years = int(exp_match.group(1))
+                if years >= 5:
+                    return "🚀 Senior (5+ yrs)"
+                if years >= 2:
+                    return "💼 Mid-level (2-5 yrs)"
+            except ValueError:
+                pass
+
     t = title.lower()
-    
+
     # Use word boundary checks to avoid partial matches (like 'intern' inside 'internal')
     if re.search(r"\b(intern|internship|trainee|campus|fresher|new grad)\b", t):
         return "🌱 Fresher / Intern"
@@ -92,21 +118,35 @@ def get_experience_tag(title):
     return "💼 Software Engineer"
 
 
-def get_graduation_tag(title: str, grad_year: int) -> str:
+# Tags that indicate a role is NOT fresher/entry-level friendly.
+# Single source of truth — replaces the old standalone is_senior() regex,
+# which used a fragile " word " boundary check and duplicated logic that
+# get_experience_tag() already does more reliably.
+_SENIOR_TAGS = {
+    "👑 Director / VP",
+    "🏆 Manager / Lead",
+    "⚡ Staff / Principal",
+    "🚀 Senior (5+ yrs)",
+}
+
+
+def is_senior(title: str, description: str = "") -> bool:
+    """True if the job's experience tag indicates a senior/lead+ role."""
+    return get_experience_tag(title, description) in _SENIOR_TAGS
+
+
+def get_graduation_tag(title: str, grad_year: int, description: str = "") -> str:
     current_year = datetime.now().year
     years_to_grad = grad_year - current_year
-    exp_tag = get_experience_tag(title)
+    exp_tag = get_experience_tag(title, description)
 
     if years_to_grad <= 0:
-        # Passouts: SDE-1 / general Software Engineer roles are excellent fits
         if any(x in exp_tag for x in ["Fresher", "Intern", "Junior", "Software Engineer"]):
             return "✅ Good for you"
         return "⚠️ May need experience"
     else:
-        # Current students (2027+): Only Intern/Trainee roles are immediate fits
         if any(x in exp_tag for x in ["Fresher", "Intern"]):
             return "✅ Good for you"
-        # SDE-1 / Software Engineer roles get marked as full-time warning
         if "Software Engineer" in exp_tag or "Junior" in exp_tag:
             return "⚠️ May need experience (Full-time)"
         return "⚠️ Check requirements"
@@ -141,7 +181,17 @@ def _expand_title(title: str) -> str:
 
 
 def _build_profile_text(student: dict) -> str:
-    """Build a rich, descriptive profile string for better embedding signal."""
+    """
+    Build a rich, semantically dense profile string for embedding.
+
+    Design goals:
+    - Mirror the language a JD uses ("proficient in", "experience with") so
+      cosine similarity is maximised between profile and JD embeddings.
+    - Enumerate every skill individually — embedding models treat each word
+      as signal; a list "Python, SQL, React" beats "programming skills".
+    - State job-type clearly (internship vs full-time) so the model can
+      distinguish a grad fresher from a mid-level professional.
+    """
     roles = student.get("preferred_roles") or []
     skills = student.get("skills") or []
     job_type = student.get("job_type", "both")
@@ -150,22 +200,45 @@ def _build_profile_text(student: dict) -> str:
     years_left = grad_year - current_year
 
     role_descriptions = {
-        "backend": "backend server-side API development",
-        "frontend": "frontend UI web development React",
-        "ml": "machine learning AI deep learning data science NLP",
-        "data": "data engineering analytics SQL pipeline ETL",
-        "devops": "DevOps cloud infrastructure Kubernetes SRE",
-        "fullstack": "fullstack web development frontend backend",
-        "android": "Android mobile Kotlin app development",
-        "ios": "iOS Swift mobile app development",
+        "backend": "backend server-side API development using REST APIs, microservices, databases",
+        "frontend": "frontend UI development with React, TypeScript, CSS, web performance",
+        "ml": "machine learning, deep learning, NLP, computer vision, AI model training and deployment",
+        "data": "data engineering, analytics pipelines, SQL, ETL, data warehousing, BI",
+        "devops": "DevOps, cloud infrastructure, Kubernetes, Docker, CI/CD, site reliability engineering",
+        "fullstack": "fullstack web development covering both frontend React and backend APIs",
+        "android": "Android mobile app development with Kotlin, Jetpack Compose, Android SDK",
+        "ios": "iOS mobile app development with Swift, SwiftUI, Xcode",
+        "pm": "product management, roadmap planning, user research, agile, cross-functional teams",
+        "analyst": "business analysis, data analysis, dashboards, stakeholder reporting",
+        "design": "product design, UX research, Figma, interaction design, usability testing",
     }
-    role_desc = " and ".join(role_descriptions.get(r, r) for r in roles)
-    exp_level = "internship or entry-level fresher" if years_left >= 0 else "software engineer"
+
+    # Compute experience level from graduation year
+    if years_left > 1:
+        exp_level = "final year student seeking internship"
+        position_type = "internship or summer internship"
+    elif years_left >= 0:
+        exp_level = "fresh graduate seeking entry-level full-time role or internship"
+        position_type = "full-time entry-level or internship"
+    else:
+        exp_level = "software professional with up to 2 years of experience"
+        position_type = "full-time software engineering"
+
+    # Override with explicit job_type preference if set
+    if job_type == "internship":
+        position_type = "internship"
+    elif job_type == "full-time":
+        position_type = "full-time entry-level"
+
+    role_desc = " and ".join(role_descriptions.get(r, r) for r in roles) or "software engineering"
+    skills_str = ", ".join(skills) if skills else "programming and software development"
 
     return (
-        f"I am a {exp_level} looking for {job_type} roles in {role_desc}. "
-        f"My technical skills include {', '.join(skills)}. "
-        f"I am interested in software engineering and technology positions."
+        f"I am a {exp_level} looking for {position_type} positions. "
+        f"My areas of interest include {role_desc}. "
+        f"I am proficient in {skills_str}. "
+        f"I am seeking roles in software engineering, technology, and product development "
+        f"at startups and technology companies."
     )
 
 
@@ -186,11 +259,11 @@ def _filter_fresher_jobs(jobs: list, grad_year: int, current_year: int) -> list:
     fresher_jobs = [
         j for j in jobs
         if any(k in j["title"].lower() for k in fresher_keywords)
-        and get_experience_tag(j["title"]) not in non_fresher_tags
+        and get_experience_tag(j["title"], j.get("description") or "") not in non_fresher_tags
     ]
     generic_ok = [
         j for j in jobs
-        if get_experience_tag(j["title"]) not in non_fresher_tags
+        if get_experience_tag(j["title"], j.get("description") or "") not in non_fresher_tags
         and j not in fresher_jobs
     ]
     return fresher_jobs if fresher_jobs else generic_ok
@@ -217,99 +290,170 @@ def _keyword_fallback_scores(jobs: list, roles: list, grad_year: int, current_ye
     return scores
 
 
-def is_senior(title: str) -> bool:
-    """Check if the job title indicates a senior role."""
-    title_lower = title.lower()
-    senior_keywords = ["senior", "lead", "staff", "architect", "manager", "ii", "iii", "iv", "v", "principal"]
-    return any(f" {k} " in f" {title_lower} " or title_lower.endswith(f" {k}") for k in senior_keywords)
-
-
 def is_non_tech(title: str) -> bool:
     """Return True if the job title indicates a non-engineering/non-tech role."""
     title_lower = title.lower()
     non_tech_keywords = [
-        "collection manager", 
-        "lending collections", 
-        "sales executive", 
+        "collection manager",
+        "lending collections",
+        "sales executive",
         "business development executive",
-        "bde", 
-        "telecaller", 
-        "customer support", 
+        "bde",
+        "telecaller",
+        "customer support",
+        "customer success",   # was missing — "Customer Success Manager" scored non-zero
         "hr recruiter",
+        "hr manager",
+        "account manager",
+        "account executive",
         "operations executive",
         "marketing manager",
-        "area collection"
+        "area collection",
     ]
     return any(k in title_lower for k in non_tech_keywords)
 
 
-def _score_jobs(jobs: list, student: dict, roles: list, embed_fn) -> list[float]:
-    """Return raw cosine scores (+ bonuses) for each job.
+# Hybrid scoring weights — must sum to 1.0
+# Tune via env vars without redeployment.
+_W_TITLE  = float(os.getenv("SCORE_W_TITLE",  "0.40"))  # profile ↔ title embedding
+_W_JD     = float(os.getenv("SCORE_W_JD",     "0.40"))  # profile ↔ JD embedding (when available)
+_W_KWORD  = float(os.getenv("SCORE_W_KWORD",  "0.20"))  # keyword/role bonus (normalised to 0-1)
+_JD_CHARS = int(os.getenv("SCORE_JD_CHARS",   "400"))   # how many JD chars to embed
 
-    Uses an in-process cache so identical job texts are never re-embedded
-    within the same process lifetime.
+
+def _score_jobs(jobs: list, student: dict, roles: list, embed_fn) -> tuple[list[float], bool]:
+    """
+    Hybrid scorer: blends three signals.
+
+    Signal 1 — Title semantic (weight _W_TITLE):
+      cosine(profile_embedding, title_embedding)
+      Cached in _EMBED_CACHE keyed on (title, company).
+
+    Signal 2 — JD semantic (weight _W_JD):
+      cosine(profile_embedding, jd_embedding[:_JD_CHARS])
+      Only computed when description is non-empty; falls back to
+      the title score when description is absent so the weights
+      still add up to 1.0.
+
+    Signal 3 — Keyword bonus (weight _W_KWORD):
+      Hard signals: role keyword match (+ROLE_BONUS) and intern match
+      (+INTERN_BONUS). Normalised to [0, 1] by dividing by their
+      maximum possible sum before blending.
+
+    Senior / non-tech penalty applied after blending.
     """
     current_year = datetime.now().year
     grad_year = student.get("graduation_year", current_year)
 
     profile_text = _build_profile_text(student)
 
-    # Build job texts, pulling from cache where possible
-    job_texts: list[str] = []
-    cache_keys: list[tuple] = []
+    # ── Build title texts and find cache misses ──────────────────────────────
+    title_texts: list[str] = []
+    title_cache_keys: list[tuple] = []
     for j in jobs:
         key = (j["title"], j.get("company", ""))
         text = f"{_expand_title(j['title'])} at {j.get('company', '')} in {j.get('location', '')}".strip()
-        job_texts.append(text)
-        cache_keys.append(key)
+        title_texts.append(text)
+        title_cache_keys.append(key)
 
-    # Determine which job texts need fresh embeddings
-    missing_indices = [i for i, k in enumerate(cache_keys) if k not in _EMBED_CACHE]
-    texts_to_embed = [profile_text] + [job_texts[i] for i in missing_indices]
+    title_missing = [i for i, k in enumerate(title_cache_keys) if k not in _EMBED_CACHE]
+
+    # ── Build JD texts (truncated) ──────────────────────────────────────────
+    # We use a separate cache keyed on ("jd", title, company) so it
+    # doesn't collide with the title cache.
+    jd_texts: list[str] = []
+    jd_cache_keys: list[tuple] = []
+    for j in jobs:
+        desc = (j.get("description") or "")[:_JD_CHARS].strip()
+        key = ("jd", j["title"], j.get("company", ""))
+        jd_texts.append(desc)
+        jd_cache_keys.append(key)
+
+    jd_missing = [i for i, k in enumerate(jd_cache_keys) if jd_texts[i] and k not in _EMBED_CACHE]
+
+    # ── Batch embed: profile + missing titles + missing JDs ─────────────────
+    texts_to_embed = ([profile_text]
+                      + [title_texts[i] for i in title_missing]
+                      + [jd_texts[i]    for i in jd_missing])
 
     fresh_embeddings = embed_fn(texts_to_embed)
 
-    if not fresh_embeddings or len(fresh_embeddings) < 2:
+    if not fresh_embeddings or len(fresh_embeddings) < 1:
         logger.warning(
-            "HF embedding API unavailable or returned insufficient data. "
-            "Falling back to keyword-only scoring — match percentages will not be shown."
+            "Local embedding model returned no data. "
+            "Falling back to keyword-only scoring — match scores will not reflect semantic similarity."
         )
-        return _keyword_fallback_scores(jobs, roles, grad_year, current_year)
+        return _keyword_fallback_scores(jobs, roles, grad_year, current_year), True
 
     profile_emb = fresh_embeddings[0]
-    fresh_job_embs = fresh_embeddings[1:]
+    fresh_rest   = fresh_embeddings[1:]
 
-    # Populate cache with newly fetched embeddings
-    for idx, emb in zip(missing_indices, fresh_job_embs):
-        _EMBED_CACHE[cache_keys[idx]] = emb
+    # Split fresh embeddings back into title vs JD batches
+    title_fresh = fresh_rest[:len(title_missing)]
+    jd_fresh    = fresh_rest[len(title_missing):]
 
-    # Assemble final embedding list from cache
-    job_embs = [_EMBED_CACHE[k] for k in cache_keys]
+    for idx, emb in zip(title_missing, title_fresh):
+        _EMBED_CACHE[title_cache_keys[idx]] = emb
 
-    scores = [calculate_cosine_similarity(profile_emb, j_emb) for j_emb in job_embs]
+    for idx, emb in zip(jd_missing, jd_fresh):
+        _EMBED_CACHE[jd_cache_keys[idx]] = emb
+
+    # ── Compute per-job scores ────────────────────────────────────────────────
+    _max_kword = ROLE_BONUS + INTERN_BONUS  # normalisation denominator
+    scores: list[float] = []
 
     for i, job in enumerate(jobs):
+        # Signal 1: title semantic
+        title_emb  = _EMBED_CACHE[title_cache_keys[i]]
+        title_sim  = calculate_cosine_similarity(profile_emb, title_emb)
+
+        # Signal 2: JD semantic (only when description present)
+        jd_key = jd_cache_keys[i]
+        if jd_texts[i] and jd_key in _EMBED_CACHE:
+            jd_sim   = calculate_cosine_similarity(profile_emb, _EMBED_CACHE[jd_key])
+            # Blend title + JD: each gets its weight; re-normalise so
+            # the two semantic signals together sum to (_W_TITLE + _W_JD).
+            sem_score = (_W_TITLE * title_sim + _W_JD * jd_sim) / (_W_TITLE + _W_JD)
+            w_sem = _W_TITLE + _W_JD
+        else:
+            # No JD → title carries the full semantic weight
+            sem_score = title_sim
+            w_sem = 1.0  # normalise so kword still contributes _W_KWORD
+
+        # Signal 3: keyword bonus (normalised 0→1)
+        kword_raw = 0.0
         if matches_role(job["title"], roles):
-            scores[i] = min(1.0, scores[i] + ROLE_BONUS)
+            kword_raw += ROLE_BONUS
         if grad_year >= current_year - 1 and is_internship(job):
-            scores[i] = min(1.0, scores[i] + INTERN_BONUS)
-        if is_senior(job["title"]):
-            scores[i] = max(0.0, scores[i] - 0.10)
+            kword_raw += INTERN_BONUS
+        kword_norm = kword_raw / _max_kword if _max_kword > 0 else 0.0
+
+        # Blend: renormalise weights to sum to 1.0 when JD is absent
+        blended = (w_sem / (w_sem + _W_KWORD)) * sem_score \
+                + (_W_KWORD / (w_sem + _W_KWORD)) * kword_norm
+
+        # Penalties
+        if is_senior(job["title"], job.get("description", "")):
+            blended = max(0.0, blended - 0.10)
         if is_non_tech(job["title"]):
-            scores[i] = 0.0
+            blended = 0.0
 
-    return scores
+        scores.append(blended)
+
+    return scores, False
 
 
-def _rescale_for_display(score: float) -> float:
-    """Rescale scores to a display-friendly 0-1 range, handling fallback values."""
-    if score == 0.20:
-        return 0.90  # 90% Match
-    elif score == 0.15:
-        return 0.80  # 80% Match
-    elif score == 0.05:
-        return 0.65  # 65% Match
-        
+def _rescale_for_display(score: float, used_fallback: bool) -> float:
+    """Rescale scores to a display-friendly 0-1 range.
+
+    `used_fallback` is passed explicitly by the caller rather than
+    inferred from the score value, so a real cosine score that happens
+    to equal 0.20/0.15/0.05 can never be misrouted into the fallback
+    display map.
+    """
+    if used_fallback:
+        return _FALLBACK_DISPLAY_MAP.get(round(score, 2), 0.60)
+
     display_floor, display_ceil = 0.25, 0.75
     display_score = (score - display_floor) / (display_ceil - display_floor)
     return round(max(0.0, min(1.0, display_score)), 4)
@@ -326,14 +470,12 @@ def match_jobs_for_student(
     dept = (student.get("department") or "cse").lower()
     skills = student.get("skills") or []
     skills_lower = [str(s).lower() for s in skills]
-    
-    # Identify if candidate has hardware/VLSI profile
+
     is_hardware = (
         dept in ["ece", "ee", "electronics", "electrical", "instrumentation"] or
         any(any(kw in sk for kw in ["vlsi", "synthesis", "physical design", "verilog", "embedded"]) for sk in skills_lower)
     )
-    
-    # Map student departments to jobs_cache categories
+
     if is_hardware:
         target_category = "hardware"
     elif dept in ["data science", "ds", "machine learning", "ml", "ai", "artificial intelligence"]:
@@ -345,26 +487,28 @@ def match_jobs_for_student(
     elif dept in ["design"]:
         target_category = "design"
     else:
-        target_category = None # fallback to show all
-        
+        target_category = None  # fallback to show all
+
     if target_category:
-        # Filter jobs by category, keeping fallback jobs with matching category
         jobs = [j for j in jobs if j.get("category") == target_category]
 
-    # Filter by preferred locations if configured
     pref_locs = student.get("preferred_locations") or []
     if pref_locs and not any(loc.lower().strip() == "any" for loc in pref_locs):
         filtered_by_loc = []
         for j in jobs:
             job_loc = j.get("location", "").lower()
-            # If any preferred city matches a substring in the job location, keep it
             if any(str(loc).lower().strip() in job_loc for loc in pref_locs):
                 filtered_by_loc.append(j)
         jobs = filtered_by_loc
 
     jobs = filter_by_job_type(jobs, student.get("job_type", "both"))
     roles = student.get("preferred_roles") or []
-    jobs = [j for j in jobs if matches_role(j["title"], roles)]
+
+    # NOTE: we no longer hard-filter jobs by matches_role() here. Doing so
+    # previously zeroed-out semantically strong matches whose titles just
+    # didn't literally contain a keyword (e.g. "Applied Scientist" for an
+    # "ml" role preference). Role match is now purely a *scoring bonus*
+    # inside _score_jobs, so the embedding similarity gets a fair say.
 
     if not jobs:
         return []
@@ -375,10 +519,10 @@ def match_jobs_for_student(
     if not jobs:
         return []
 
-    scores = _score_jobs(jobs, student, roles, embed_fn)
+    scores, used_fallback = _score_jobs(jobs, student, roles, embed_fn)
     ranked = sorted(zip(jobs, scores), key=lambda x: x[1], reverse=True)
     results = [(job, score) for job, score in ranked if score >= threshold][:top_n]
-    return [(job, _rescale_for_display(score)) for job, score in results]
+    return [(job, _rescale_for_display(score, used_fallback)) for job, score in results]
 
 
 def build_match_reason(job: dict, student: dict) -> str:

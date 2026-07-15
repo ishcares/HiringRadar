@@ -1,19 +1,13 @@
 import os
 import json
 import time
-from google import genai
-from google.genai import errors
-from dotenv import load_dotenv
+from groq import Groq
 
 # Ensure environment variables are loaded
 load_dotenv()
 
 # Configure Gemini Client
-gemini_key = os.getenv("GEMINI_API_KEY")
-client = None
-if gemini_key:
-    client = genai.Client(api_key=gemini_key)
-
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 def execute_gemini_with_retry(prompt: str, model_name: str = 'gemini-3.5-flash', max_retries: int = 3) -> str:
     """Executes a Gemini generation call with exponential back-off retries to handle 429/503 errors."""

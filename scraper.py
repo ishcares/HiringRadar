@@ -18,33 +18,39 @@ def is_india_location(location: str) -> bool:
 
     location_lower = location.lower()
 
-    # Locations that are always blocked, even if "remote" appears alongside them
+    # Explicit India cities / country — checked FIRST. Multi-location postings
+    # like "San Francisco, Bangalore, Remote" must pass even though a
+    # blocklisted city also appears in the same string.
+    india_keywords = [
+        "india", "bangalore", "bengaluru", "mumbai", "delhi",
+        "hyderabad", "pune", "chennai", "noida", "gurgaon",
+        "gurugram", "kolkata",
+    ]
+    if any(k in location_lower for k in india_keywords):
+        return True
+
+    # Remote → always India-accessible ✅ (checked before blocklist so
+    # "Canada (Remote)" style postings still pass, same as original intent)
+    remote_keywords = ["remote", "work from anywhere", "worldwide", "wfh"]
+    if any(r in location_lower for r in remote_keywords):
+        return True
+
+    # Hard blocklist — only reached if no India keyword and no remote
+    # keyword matched above. e.g. "Toronto, Canada" with no remote mention.
     hard_blocklist = [
         "malaysia", "singapore", "united states", "us, ", " usa",
-        "london", "uk,", "europe", "australia", "canada",
+        "london", "uk,", "europe", "canada",
         "new york", "san francisco", "seattle",
         # Turkey — ASCII and Unicode variants
         "turkiye", "türkiye", "turkey", "ankara", "istanbul",
-        # Other non-India countries
+        # Other non-India, non-remote countries
         "berlin", "amsterdam", "dubai", "uae", "japan", "china",
         "brazil", "mexico", "france", "germany", "poland", "romania",
     ]
     if any(b in location_lower for b in hard_blocklist):
         return False
 
-    # Pure remote (no country = India-accessible) ✅
-    # e.g. "Remote", "Remote - Worldwide", "Work from Anywhere"
-    remote_keywords = ["remote", "work from anywhere", "worldwide", "wfh"]
-    if any(r in location_lower for r in remote_keywords):
-        return True
-
-    # Explicit India cities / country
-    india_keywords = [
-        "india", "bangalore", "bengaluru", "mumbai", "delhi",
-        "hyderabad", "pune", "chennai", "noida", "gurgaon",
-        "gurugram", "kolkata",
-    ]
-    return any(k in location_lower for k in india_keywords)
+    return False
 
 
 def is_relevant(title):
@@ -65,6 +71,11 @@ def is_relevant(title):
         "content", "copywriter", "brand", "growth manager",
         "associate, ", "associate -", "collection", "collections",
         "lending", "credit officer", "operations", "commercial",
+        # Senior/Experience blocks — "staff" catches Staff Engineer, Staff PM etc.
+        "senior", "sr.", "sr ", "staff ", "staff,", "lead", "manager", "principal",
+        "architect", "director", "vp", "chief", "head of", "head,",
+        "sde-2", "sde-3", "sde ii", "sde iii",
+        "experienced", "mid-level", "mid level",
     ]
     title_lower = title.lower()
     if any(bad in title_lower for bad in blocklist):
@@ -85,6 +96,9 @@ def is_data_science_relevant(title: str) -> bool:
     blocklist = [
         "customer support", "customer success", "sales",
         "human resources", "recruiter", "marketing", "legal",
+        # Senior/Experience blocks
+        "senior", "sr.", "sr ", "lead", "manager", "principal", "architect",
+        "director", "vp", "chief", "experienced", "mid-level", "mid level"
     ]
     title_lower = title.lower()
     if any(bad in title_lower for bad in blocklist):
@@ -204,12 +218,14 @@ def scrape_workday(company_name, tenant, job_board, wd_num=1):
                 continue
             external_path = job.get("externalPath", "")
             job_url = f"{apply_base}{external_path}"
+            # Workday list API does not expose full job descriptions.
             relevant.append({
                 "company": company_name,
                 "title": title,
                 "location": location,
                 "url": job_url,
                 "category": category,
+                "description": "",
             })
 
         # Stop paginating if we got fewer results than the page size
@@ -258,11 +274,11 @@ def scrape_smartrecruiters(company_name: str, company_id: str):
                 continue
 
             # Location — SmartRecruiters nests it under job.location
-            loc = job.get("location", {})
+            loc = job.get("location") or {}
             location = ", ".join(filter(None, [
                 loc.get("city", ""),
                 loc.get("country", ""),
-                "Remote" if job.get("location", {}).get("remote") else "",
+                "Remote" if loc.get("remote") else "",
             ])) or "Not specified"
             if not is_india_location(location):
                 continue
@@ -271,12 +287,14 @@ def scrape_smartrecruiters(company_name: str, company_id: str):
             job_url = (
                 f"https://jobs.smartrecruiters.com/{company_id}/{job_id}"
             )
+            # SmartRecruiters posting list does not include full descriptions.
             relevant.append({
                 "company": company_name,
                 "title": title,
                 "location": location,
                 "url": job_url,
                 "category": category,
+                "description": "",
             })
 
         # Paginate until exhausted
@@ -320,12 +338,17 @@ def scrape_greenhouse_json(company_name, board_token):
         if not is_india_location(location):
             continue
         job_url = job.get("absolute_url", "")
+        # Greenhouse list API does not include job descriptions.
+        # Fetching each job's detail page is too slow (~N * 1s RTT).
+        # The description field stays empty here and is enriched later
+        # once we have a matching candidate (or via a background detail fetch).
         relevant.append({
             "company": company_name,
             "title": title,
             "location": location,
             "url": job_url,
             "category": category,
+            "description": "",
         })
     return relevant
 
@@ -349,98 +372,489 @@ def scrape_lever(company_name, company_slug):
         print(f"Failed to fetch {company_name}: {response.status_code}")
         return []
 
-    jobs = response.json()
+    try:
+        jobs = response.json()
+    except Exception as e:
+        print(f"Failed to fetch {company_name}: invalid JSON ({e})")
+        return []
+
     relevant = []
 
     for job in jobs:
-        title = job["text"]
+        # Use .get() throughout — a single malformed posting (missing
+        # 'text', 'categories', or 'hostedUrl') must not crash the whole
+        # company's scrape and lose every other valid job in this batch.
+        title = job.get("text", "")
+        if not title:
+            continue
         category = check_job_relevance_and_category(title)
         if not category:
             continue
-        location = job["categories"].get("location", "Not specified")
+        location = (job.get("categories") or {}).get("location", "Not specified")
         if not is_india_location(location):
-            continue
+             continue
+        job_url = job.get("hostedUrl", "")
+        description = job.get("descriptionPlain", "") or job.get("description", "")
         relevant.append({
             "company": company_name,
             "title": title,
             "location": location,
-            "url": job["hostedUrl"],
+            "url": job_url,
             "category": category,
+            "description": description, 
         })
     return relevant
 
+def scrape_ashby(company_name, company_token):
+    # Try public API first
+    api_url = f"https://api.ashbyhq.com/v1/iframe/web/jobs?jobBoardId={company_token}"
+    try:
+        response = requests.get(api_url, timeout=10)
+        if response.status_code == 200:
+            jobs = response.json().get('jobs', [])
+            relevant = []
+            for j in jobs:
+                title = j.get('title', '')
+                category = check_job_relevance_and_category(title)
+                if not category:
+                    continue
+                location = j.get('location', 'Not specified')
+                if not is_india_location(location):
+                    continue
+                description = j.get('descriptionPlain', '') or j.get('descriptionHtml', '') or ''
+                relevant.append({
+                    "company": company_name,
+                    "title": title,
+                    "location": location,
+                    "url": j.get('jobUrl', ''),
+                    "category": category,
+                    "description": description,
+                })
+            return relevant
+    except Exception as e:
+        print(f"Ashby API failed for {company_name}: {e}")
+
+    # Fallback to jobs.ashbyhq.com HTML parser if API throws 401
+    try:
+        from bs4 import BeautifulSoup
+        from urllib.parse import urljoin
+        web_url = f"https://jobs.ashbyhq.com/{company_token}"
+        web_res = requests.get(web_url, timeout=10)
+        if web_res.status_code == 200:
+            soup = BeautifulSoup(web_res.text, 'html.parser')
+            relevant = []
+            for a in soup.find_all('a', href=True):
+                if f"/{company_token}/" in a['href']:
+                    job_url = urljoin(web_url, a['href'])
+                    title_elem = a.find('h4')
+                    title = title_elem.text.strip() if title_elem else a.text.strip()
+                    if not title:
+                        continue
+                    category = check_job_relevance_and_category(title)
+                    if not category:
+                        continue
+                    # Ashby HTML board doesn't expose location without a subpage crawl.
+                    # We accept all listings here — the detail page fetch (if added later)
+                    # can refine the location. For now we tag as Remote / India.
+                    relevant.append({
+                        "company": company_name,
+                        "title": title,
+                        "location": "Remote / India",
+                        "url": job_url,
+                        "category": category,
+                        "description": "",
+                    })
+            return relevant
+    except Exception as e:
+        print(f"Ashby HTML fallback failed for {company_name}: {e}")
+    return []
+
+def scrape_keka(company_name, tenant):
+    web_url = f"https://{tenant}.keka.com/careers"
+    try:
+        from bs4 import BeautifulSoup
+        from urllib.parse import urljoin
+        res = requests.get(web_url, timeout=10)
+        if res.status_code == 200:
+            soup = BeautifulSoup(res.text, 'html.parser')
+            relevant = []
+            for a in soup.find_all('a', href=True):
+                href = a['href']
+                if "/applyjob/" in href:
+                    job_url = urljoin(web_url, href)
+                    title = a.text.strip()
+                    # Clean title if it contains apply text
+                    title = title.replace("Apply", "").strip()
+                    category = check_job_relevance_and_category(title)
+                    if not category:
+                        continue
+                    
+                    # Try to check location from surrounding text elements in Keka
+                    location = "India / Remote"
+                    parent = a.find_parent()
+                    if parent:
+                        parent_text = parent.text.lower()
+                        # If a non-India location is found in the card, filter it out
+                        if not is_india_location(parent_text):
+                            continue
+                            
+                    # Keka HTML board does not include job descriptions inline.
+                    relevant.append({
+                        "company": company_name,
+                        "title": title,
+                        "location": location,
+                        "url": job_url,
+                        "category": category,
+                        "description": "",
+                    })
+            return relevant
+    except Exception as e:
+        print(f"Keka fetch failed for {company_name}: {e}")
+    return []
+
+def scrape_icims(company_name, customer_token):
+    web_url = f"https://{customer_token}.icims.com/jobs/search?pr=0&in_iframe=1"
+    try:
+        from bs4 import BeautifulSoup
+        from urllib.parse import urljoin
+        res = requests.get(web_url, timeout=10)
+        if res.status_code == 200:
+            soup = BeautifulSoup(res.text, 'html.parser')
+            relevant = []
+            # iCIMS lists jobs inside table rows or divs with class 'container-fluid'
+            for a in soup.find_all('a', href=True):
+                href = a['href']
+                if "/jobs/" in href and "/candidate" not in href:
+                    job_url = urljoin(web_url, href)
+                    # Get title and clean it
+                    title = a.text.strip()
+                    if not title or len(title) < 3 or "click" in title.lower():
+                        continue
+                    category = check_job_relevance_and_category(title)
+                    if not category:
+                        continue
+                    
+                    # Locate and validate location on iCIMS
+                    location = "India / Remote"
+                    parent = a.find_parent('div')
+                    if parent:
+                        loc_elem = parent.find(class_='description')
+                        if loc_elem:
+                            location = loc_elem.text.strip()
+                    if not is_india_location(location):
+                        continue
+                            
+                    # iCIMS HTML board does not include job descriptions inline.
+                    relevant.append({
+                        "company": company_name,
+                        "title": title,
+                        "location": location,
+                        "url": job_url,
+                        "category": category,
+                        "description": "",
+                    })
+            return relevant
+    except Exception as e:
+        print(f"iCIMS fetch failed for {company_name}: {e}")
+    return []
+
+
+def scrape_amazon(max_results: int = 300) -> list[dict]:
+    """
+    Scrape Amazon/AWS India jobs using Amazon's internal JSON search API
+    (the same endpoint their careers SPA calls — no auth required).
+
+    Endpoint: https://amazon.jobs/en/search.json
+    Filters:  country_code=IND, offset pagination, result_limit=100 per page
+
+    NOTE: Google and Apple use SSR/JS-rendered React SPAs with no publicly
+    accessible JSON API — they require Playwright for headless rendering.
+    """
+    base_url = "https://amazon.jobs/en/search.json"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json, */*",
+        "Referer": "https://amazon.jobs/en/search",
+    }
+    relevant = []
+    offset = 0
+    page_size = 100
+
+    while len(relevant) < max_results:
+        params = {
+            "normalized_country_code[]": "IND",
+            "result_limit": page_size,
+            "offset": offset,
+        }
+        try:
+            resp = requests.get(base_url, params=params, headers=headers, timeout=15)
+        except Exception as e:
+            print(f"Amazon fetch error at offset {offset}: {e}")
+            break
+
+        if resp.status_code != 200:
+            print(f"Amazon API returned HTTP {resp.status_code} at offset {offset}")
+            break
+
+        try:
+            data = resp.json()
+        except Exception as e:
+            print(f"Amazon JSON parse error: {e}")
+            break
+
+        jobs = data.get("jobs", [])
+        if not jobs:
+            break
+
+        for job in jobs:
+            title = job.get("title", "")
+            category = check_job_relevance_and_category(title)
+            if not category:
+                continue
+
+            city    = job.get("city", "")
+            country = job.get("country_code", "")
+            location = f"{city}, {country}".strip(", ") or "India"
+            if not is_india_location(location):
+                continue
+
+            job_id  = job.get("id_icims") or job.get("job_id", "")
+            job_url = f"https://amazon.jobs/en/jobs/{job_id}" if job_id else ""
+
+            # Amazon's search API returns description inline — strip HTML tags
+            raw_desc = job.get("description", "") or ""
+            import re as _re
+            description = _re.sub(r"<[^>]+>", " ", raw_desc).strip()
+
+            relevant.append({
+                "company":     "Amazon",
+                "title":       title,
+                "location":    location,
+                "url":         job_url,
+                "category":    category,
+                "description": description,
+            })
+
+        if len(jobs) < page_size:
+            break  # last page
+        offset += page_size
+
+    return relevant
+
+
 def get_all_jobs():
     all_jobs = []
+    status_rows = []
+    from datetime import datetime, timezone
+    import csv
+    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
+    # ── Greenhouse ────────────────────────────────────────────────────────────
     for name, token in [
-        # ── Existing ──────────────────────────────────────────
-        ("Razorpay",  "razorpaysoftwareprivatelimited"),
-        ("PhonePe",   "phonepe"),
-        ("Groww",     "groww"),
-        ("Postman",   "postman"),
-        ("Coinbase",  "coinbase"),
-        ("Rubrik",    "rubrik"),
-        ("Tekion",    "tekion"),
-        ("InMobi",    "inmobi"),
-        ("DeepMind",  "deepmind"),
-        ("Glean",     "gleanwork"),
-        ("Stripe",    "stripe"),
-        # ── Newly verified ────────────────────────────────────
-        ("Samsara",   "samsara"),       # IoT/fleet tech, India R&D hub
-        ("Mixpanel",  "mixpanel"),      # product analytics, India eng team
-        ("Zscaler",   "zscaler"),       # cloud security, large India office
-        ("PagerDuty", "pagerduty"),     # DevOps/SRE platform, India team
-        ("YugabyteDB","yugabyte"),      # distributed SQL DB, India dev team
-        ("Vercel",    "vercel"),        # frontend infra, remote-friendly
-        ("Brex",      "brex"),          # fintech, India eng presence
-        ("Figma",     "figma"),         # design tool, India team
-        ("Airtable",  "airtable"),      # no-code platform, remote roles
+        # Core Indian tech companies
+        ("Razorpay",   "razorpaysoftwareprivatelimited"),
+        ("PhonePe",    "phonepe"),
+        ("Groww",      "groww"),
+        ("Postman",    "postman"),
+        ("Coinbase",   "coinbase"),
+        ("Rubrik",     "rubrik"),
+        ("Tekion",     "tekion"),
+        ("InMobi",     "inmobi"),
+        ("DeepMind",   "deepmind"),
+        ("Glean",      "gleanwork"),
+        ("Stripe",     "stripe"),
+        ("Samsara",    "samsara"),
+        ("Mixpanel",   "mixpanel"),
+        ("Zscaler",    "zscaler"),
+        ("PagerDuty",  "pagerduty"),
+        ("YugabyteDB", "yugabyte"),
+        ("Vercel",     "vercel"),
+        ("Brex",       "brex"),
+        ("Figma",      "figma"),
+        ("Airtable",   "airtable"),
+        ("Airbnb",     "airbnb"),
+        ("Reddit",     "reddit"),
+        ("Databricks", "databricks"),
+        ("MongoDB",    "mongodb"),
+        ("Twilio",     "twilio"),
+        ("Elastic",    "elastic"),
+        ("Okta",       "okta"),
+        ("Affirm",     "affirm"),
+        ("Cloudflare", "cloudflare"),
+        ("Remote.com", "remote"),
+        # Finance / Quant
+        ("Jane Street", "janestreet"),   # confirmed OK
+        ("Slice",        "slice"),
+        # Indian product startups — VERIFIED Greenhouse tokens only.
+        # All 12 previously listed companies (Clevertap, Darwinbox, Lenskart,
+        # Dunzo, Nykaa, Swiggy, Ola, Vedantu, Unacademy, ShareChat, Innovaccer,
+        # Exotel) returned 404 — they do NOT use Greenhouse. Do not re-add them.
+        # Add new companies here ONLY after confirming with:
+        #   curl -s "https://boards-api.greenhouse.io/v1/boards/<TOKEN>/jobs"
+        # NOTE: Citadel/Bloomberg/Barclays also 404 on Greenhouse (proprietary ATS).
+        # NOTE: Google, Amazon, Apple use custom ATS portals.
     ]:
-
         try:
-            all_jobs += scrape_greenhouse_json(name, token)
+            jobs = scrape_greenhouse_json(name, token)
+            all_jobs += jobs
+            status_rows.append([name, "Greenhouse", "Success", now_str, f"Found {len(jobs)} jobs"])
         except Exception as e:
+            status_rows.append([name, "Greenhouse", "Failed", now_str, str(e)])
             print(f"Error scraping Greenhouse for {name}: {e}")
 
+    # ── Lever ─────────────────────────────────────────────────────────────────
     for name, slug in [
-        ("CRED", "cred"),
-        ("Meesho", "meesho"),
-        ("Paytm", "paytm"),
-        ("Hevo Data", "hevodata"),
-        ("Stable Money", "stable-money1"),
-        ("Zeta", "zeta"),
-        ("Sprinto", "Sprinto"),
-        ("Mindtickle", "mindtickle"),
-        ("fi.money", "epifi"),
-        ("FamPay", "fampay"),          # fintech for students, hires interns
-        ("JumpCloud", "jumpcloud"),
+        ("CRED",          "cred"),
+        ("Meesho",        "meesho"),
+        ("Paytm",         "paytm"),
+        ("Hevo Data",     "hevodata"),
+        ("Stable Money",  "stable-money1"),
+        ("Zeta",          "zeta"),
+        ("Sprinto",       "Sprinto"),
+        ("Mindtickle",    "mindtickle"),
+        ("fi.money",      "epifi"),
+        ("FamPay",        "fampay"),
+        ("Coda",          "coda"),
+        ("Zepto",         "zepto"),
+        ("Yellow.ai",     "yellowmessenger"),
+        ("JumpCloud",     "jumpcloud"),
+        ("Pocket FM",     "pocketfm"),
+        # Indian startups on Lever — slugs confirmed via lever.co/v0 API
+        # To verify: curl -s "https://api.lever.co/v0/postings/<SLUG>?mode=json"
+        # Do NOT add slugs here that return 404 or an empty list.
+        # Remote-first companies on Lever
+        ("Doist",         "doist"),
+        ("Hotjar",        "hotjar"),
+        ("Maze",          "maze"),
+        ("Linear",        "linear"),
+        ("Veritas",       "veritas"),
     ]:
         try:
-            all_jobs += scrape_lever(name, slug)
+            jobs = scrape_lever(name, slug)
+            all_jobs += jobs
+            status_rows.append([name, "Lever", "Success", now_str, f"Found {len(jobs)} jobs"])
         except Exception as e:
+            status_rows.append([name, "Lever", "Failed", now_str, str(e)])
             print(f"Error scraping Lever for {name}: {e}")
 
-    # ── Workday (plain HTTP — no session needed) ───────────────────────────────
-    # HTTP 200 = works | HTTP 422 = wrong board slug | Cloudflare = use playwright
+    # ── Workday ───────────────────────────────────────────────────────────────
     for name, tenant, board, wd in [
-        ("Salesforce", "salesforce", "External_Career_Site", 12),  # verified
+        ("Salesforce",    "salesforce", "External_Career_Site",      12),
+        ("Samsung",       "sec",        "samsungcareers",             12),
+        ("Atlassian",     "atlassian",  "AtlassianCareers",           12),
+        # Finance / Big Tech on Workday
+        ("Nvidia",        "nvidia",     "NVIDIAExternalCareerSite",    5),
+        ("JP Morgan",     "jpmc",       "External_Career_Site",        1),
+        ("Goldman Sachs", "gs",         "External_Career_Site",        1),
+        ("Microsoft",     "microsoft",  "External",                    5),
     ]:
         try:
-            all_jobs += scrape_workday(name, tenant, board, wd)
+            jobs = scrape_workday(name, tenant, board, wd)
+            all_jobs += jobs
+            status_rows.append([name, "Workday", "Success", now_str, f"Found {len(jobs)} jobs"])
         except Exception as e:
+            status_rows.append([name, "Workday", "Failed", now_str, str(e)])
             print(f"Error scraping Workday for {name}: {e}")
 
-    # ── SmartRecruiters (public postings API) ──────────────────────────────────
-    # Verified via api.smartrecruiters.com/v1/companies/{id}/postings
+    # ── Ashby ─────────────────────────────────────────────────────────────────
     for name, company_id in [
-        ("Freshworks",   "Freshworks"),    # 114 jobs verified — CRM/SaaS, India HQ
-        ("BrowserStack", "BrowserStack"),  # board exists — testing platform, India HQ
-        ("Chargebee",    "Chargebee"),     # board exists — billing SaaS, India team
+        ("Superhuman",  "superhuman"),
+        ("PostHog",     "posthog"),
+        ("Notion",      "notion"),
+        # NOTE: Pika/Perplexity/Anduril removed — unconfirmed Ashby tokens
+        # and minimal India hiring. Add back only after verifying:
+        #   curl -s "https://api.ashbyhq.com/v1/iframe/web/jobs?jobBoardId=<TOKEN>"
     ]:
         try:
-            all_jobs += scrape_smartrecruiters(name, company_id)
+            jobs = scrape_ashby(name, company_id)
+            all_jobs += jobs
+            status_rows.append([name, "Ashby", "Success", now_str, f"Found {len(jobs)} jobs"])
         except Exception as e:
+            status_rows.append([name, "Ashby", "Failed", now_str, str(e)])
+            print(f"Error scraping Ashby for {name}: {e}")
+
+    # ── SmartRecruiters ───────────────────────────────────────────────────────
+    # ALL company IDs below confirmed via verify_ats.py (200 OK response).
+    # To add more: python verify_ats.py and look for SmartRecruiters OK rows.
+    for name, company_id in [
+        ("Freshworks",   "Freshworks"),
+        ("BrowserStack", "BrowserStack"),
+        ("Chargebee",    "Chargebee"),
+        ("Zomato",       "Zomato1"),
+        ("Canva",        "canva"),
+        ("Agoda",        "Agoda"),
+        ("Whatfix",      "WhatfixInc"),
+        # Below verified OK via verify_ats.py live API check
+        ("Swiggy",       "Swiggy"),
+        ("Nykaa",        "Nykaa"),
+        ("Clevertap",    "Clevertap"),
+        ("Darwinbox",    "Darwinbox"),
+        ("ShareChat",    "Sharechat"),
+        ("Turing",       "Turing"),
+        ("Games24x7",    "Games24x7"),
+        ("Juspay",       "Juspay"),
+    ]:
+        try:
+            jobs = scrape_smartrecruiters(name, company_id)
+            all_jobs += jobs
+            status_rows.append([name, "SmartRecruiters", "Success", now_str, f"Found {len(jobs)} jobs"])
+        except Exception as e:
+            status_rows.append([name, "SmartRecruiters", "Failed", now_str, str(e)])
             print(f"Error scraping SmartRecruiters for {name}: {e}")
+
+    # ── Keka Hire ─────────────────────────────────────────────────────────────
+    for name, tenant in [
+        ("Jupiter",    "jupiter"),
+        ("Chalo",      "chalo"),
+        ("Epigamia",   "epigamia"),
+        ("Toppr",      "toppr"),
+        ("mFine",      "mfine"),
+        ("Park+",      "parkplus"),
+        ("Loco",       "loco"),
+        ("Zupay",      "zupay"),
+        ("Obvious",   "obvious"),
+    ]:
+        try:
+            jobs = scrape_keka(name, tenant)
+            all_jobs += jobs
+            status_rows.append([name, "Keka Hire", "Success", now_str, f"Found {len(jobs)} jobs"])
+        except Exception as e:
+            status_rows.append([name, "Keka Hire", "Failed", now_str, str(e)])
+            print(f"Error scraping Keka for {name}: {e}")
+
+    # ── iCIMS ─────────────────────────────────────────────────────────────────
+    for name, token in [
+        ("GitHub", "careers-githubinc"),
+    ]:
+        try:
+            jobs = scrape_icims(name, token)
+            all_jobs += jobs
+            status_rows.append([name, "iCIMS", "Success", now_str, f"Found {len(jobs)} jobs"])
+        except Exception as e:
+            status_rows.append([name, "iCIMS", "Failed", now_str, str(e)])
+            print(f"Error scraping iCIMS for {name}: {e}")
+
+    # ── Amazon Jobs (custom JSON API) ─────────────────────────────────────────
+    # amazon.jobs/en/search.json is the internal REST endpoint their SPA uses.
+    # No auth, no browser required. Paginates up to 300 India-based results.
+    # Google and Apple are JS-rendered SPAs — require Playwright (not added yet).
+    try:
+        amazon_jobs = scrape_amazon(max_results=300)
+        all_jobs += amazon_jobs
+        status_rows.append(["Amazon", "Custom JSON API", "Success", now_str, f"Found {len(amazon_jobs)} jobs"])
+    except Exception as e:
+        status_rows.append(["Amazon", "Custom JSON API", "Failed", now_str, str(e)])
+        print(f"Error scraping Amazon: {e}")
+
+    # Write status health report to CSV sheet
+    try:
+        status_file = "company_status.csv"
+        with open(status_file, "w", newline="", encoding="utf-8") as sf:
+            writer = csv.writer(sf)
+            writer.writerow(["Company Name", "ATS System", "Status", "Last Attempted (UTC)", "Details"])
+            writer.writerows(status_rows)
+    except PermissionError:
+        print("Warning: company_status.csv is locked. Skipping status write.")
 
     return all_jobs
 
