@@ -82,9 +82,8 @@ def group_jobs(jobs):
 
 
 def get_experience_tag(title: str, description: str = "") -> str:
-    # First check description for explicit experience year requirements (e.g., 2-5 years, 3+ years)
+    # First check description for explicit experience year requirements
     # NOTE: description can be None when loaded from Supabase (NULL != empty string).
-    # Use `or ""` — not a default arg — to guard against this at the call site.
     desc_lower = (description or "").lower()
     if desc_lower:
         exp_match = re.search(r"(\b\d+)(?:-\d+)?\+?\s*(?:years?|yrs?)\b\s*(?:of\s*)?\s*(?:experience|software|work|product)", desc_lower)
@@ -100,18 +99,35 @@ def get_experience_tag(title: str, description: str = "") -> str:
 
     t = title.lower()
 
-    # Use word boundary checks to avoid partial matches (like 'intern' inside 'internal')
+    # Use word boundary checks to avoid partial matches
     if re.search(r"\b(intern|internship|trainee|campus|fresher|new grad)\b", t):
         return "🌱 Fresher / Intern"
     if re.search(r"\b(director|vp|vice president|head of|chief)\b", t):
         return "👑 Director / VP"
     if re.search(r"\b(engineering manager|tech lead|team lead|lead engineer|engineering lead|lead)\b", t):
         return "🏆 Manager / Lead"
-    if re.search(r"\b(principal|staff|architect|sde-3|sde iii)\b", t):
+    if re.search(r"\b(principal|staff|architect|sde-3|sde iii|sde3|sdeiii)\b", t):
         return "⚡ Staff / Principal"
-    if re.search(r"\b(senior|sr|sde-2|sde ii)\b", t):
+
+    # ── Senior / SDE-2 detection ──────────────────────────────────────────────
+    # Catches: Senior, Sr., SDE-2, SDE-II, SDE 2, SDE2, SDE II, SDEii
+    # Also: "Software Development Engineer-II", "Software Engineer 2", "SWE-2"
+    if re.search(r"\b(senior|sr\.?)\b", t):
         return "🚀 Senior (5+ yrs)"
-    if re.search(r"\b(junior|jr|sde-1|sde i|associate)\b", t):
+    if re.search(
+        r"\b(?:sde|swe|software\s+(?:development\s+)?engineer)(?:[\s-]*(?:ii|2))\b",
+        t
+    ):
+        return "💼 Mid-level (2-5 yrs)"  # SDE-2 = 2-4 years, mid not senior
+    if re.search(r"\bengineer[\s-]*ii\b", t):
+        return "💼 Mid-level (2-5 yrs)"
+    if re.search(r"\bengineer[\s-]*2\b", t):
+        return "💼 Mid-level (2-5 yrs)"
+    # ── End senior / SDE-2 detection ─────────────────────────────────────────
+
+    if re.search(r"\b(junior|jr\.?|sde-1|sde i|sde1|associate)\b", t):
+        return "🔵 Junior (0-2 yrs)"
+    if re.search(r"\bengineer[\s-]*(?:i|1)\b", t):
         return "🔵 Junior (0-2 yrs)"
     if re.search(r"\b(mid-level|mid level|experienced)\b", t):
         return "💼 Mid-level (2-5 yrs)"
@@ -119,14 +135,13 @@ def get_experience_tag(title: str, description: str = "") -> str:
 
 
 # Tags that indicate a role is NOT fresher/entry-level friendly.
-# Single source of truth — replaces the old standalone is_senior() regex,
-# which used a fragile " word " boundary check and duplicated logic that
-# get_experience_tag() already does more reliably.
+# SDE-2 / Mid-level is included — a 2026 grad should not get SDE-2 alerts.
 _SENIOR_TAGS = {
     "👑 Director / VP",
     "🏆 Manager / Lead",
     "⚡ Staff / Principal",
     "🚀 Senior (5+ yrs)",
+    "💼 Mid-level (2-5 yrs)",   # SDE-2, Engineer II — needs 2-4 yrs experience
 }
 
 
@@ -313,37 +328,160 @@ def is_non_tech(title: str) -> bool:
     return any(k in title_lower for k in non_tech_keywords)
 
 
-# Hybrid scoring weights — must sum to 1.0
+# ── Scoring weights (all 4 signals, must sum to 1.0) ─────────────────────────
 # Tune via env vars without redeployment.
-_W_TITLE  = float(os.getenv("SCORE_W_TITLE",  "0.40"))  # profile ↔ title embedding
-_W_JD     = float(os.getenv("SCORE_W_JD",     "0.40"))  # profile ↔ JD embedding (when available)
-_W_KWORD  = float(os.getenv("SCORE_W_KWORD",  "0.20"))  # keyword/role bonus (normalised to 0-1)
-_JD_CHARS = int(os.getenv("SCORE_JD_CHARS",   "400"))   # how many JD chars to embed
+_W_SEMANTIC  = float(os.getenv("SCORE_W_SEMANTIC",  "0.45"))  # skills embedding (title + JD)
+_W_SKILLS    = float(os.getenv("SCORE_W_SKILLS",    "0.25"))  # explicit skills keyword overlap
+_W_EXP       = float(os.getenv("SCORE_W_EXP",       "0.20"))  # experience level compatibility
+_W_LOCATION  = float(os.getenv("SCORE_W_LOCATION",  "0.10"))  # location preference match
+_JD_CHARS    = int(os.getenv("SCORE_JD_CHARS",      "400"))   # how many JD chars to embed
+
+# Sub-weights within the semantic signal
+_W_TITLE  = 0.40   # title proportion of semantic
+_W_JD     = 0.60   # JD proportion of semantic (when description present)
+
+
+def _skills_overlap_score(student_skills: list, job_title: str, job_desc: str) -> float:
+    """
+    Signal 1 — Skills keyword overlap.
+
+    Checks how many of the student's skills appear (case-insensitive, word-boundary)
+    in the job title + description. Returns 0-1.
+
+    E.g. student has [Python, Django, Redis], job mentions Python + Django = 2/3 = 0.67
+    """
+    if not student_skills:
+        return 0.5  # neutral when no skills set
+
+    haystack = (job_title + " " + job_desc).lower()
+    matched = 0
+    for skill in student_skills:
+        # Word-boundary aware: "go" shouldn't match "good" or "Django"
+        pattern = r"\b" + re.escape(str(skill).lower().strip()) + r"\b"
+        if re.search(pattern, haystack):
+            matched += 1
+
+    return matched / len(student_skills)
+
+
+def _experience_score(job_title: str, job_desc: str, grad_year: int, current_year: int) -> float:
+    """
+    Signal 3 — Experience compatibility.
+
+    Returns how well the student's experience level fits the role:
+      1.0 = perfect fit (fresher for intern/fresher role, or grad for generic SDE)
+      0.7 = acceptable (slightly over/under qualified)
+      0.3 = poor fit (senior role for fresh grad)
+      0.0 = zero fit (director/VP for student)
+
+    Unlike the binary filter, this contributes positively to the match score,
+    so a perfect-level role actually boosts the final percentage.
+    """
+    tag = get_experience_tag(job_title, job_desc or "")
+    years_since_grad = current_year - grad_year   # negative = still studying
+
+    if tag in ("🌱 Fresher / Intern",):
+        # Fresher/intern role
+        if years_since_grad <= 0:
+            return 1.0   # perfect: still in college, role is for students
+        elif years_since_grad <= 1:
+            return 0.85  # just graduated, still fine
+        else:
+            return 0.50  # over-qualified for pure intern
+
+    elif tag in ("🔵 Junior (0-2 yrs)",):
+        if years_since_grad <= 1:
+            return 1.0   # perfect: fresh grad for junior role
+        elif years_since_grad <= 2:
+            return 0.85
+        elif years_since_grad <= 0:
+            return 0.70  # final-year student: slightly junior
+        else:
+            return 0.40
+
+    elif tag in ("💼 Software Engineer",):   # generic title, no level signal
+        if years_since_grad <= 2:
+            return 0.85  # most generic SDE roles accept fresh grads
+        return 0.65
+
+    elif tag in ("💼 Mid-level (2-5 yrs)",):
+        if years_since_grad <= 1:
+            return 0.30  # fresh grad applying for SDE-2: poor fit
+        elif years_since_grad <= 3:
+            return 0.70
+        return 0.85
+
+    elif tag in ("🚀 Senior (5+ yrs)",):
+        if years_since_grad <= 2:
+            return 0.15
+        return 0.50
+
+    elif tag in ("🏆 Manager / Lead", "⚡ Staff / Principal", "👑 Director / VP"):
+        return 0.05  # essentially never right for a student
+
+    return 0.60  # fallback
+
+
+def _location_score(job_location: str, preferred_locations: list) -> float:
+    """
+    Signal 4 — Location compatibility.
+
+    Returns how well the job location matches student preferences:
+      1.0 = exact match (student wants Bangalore, job is Bangalore)
+      0.85 = remote (always acceptable)
+      0.60 = student set 'any' (no preference = neutral)
+      0.10 = no match (student wants Mumbai, job is Chennai)
+
+    Unlike the binary filter in match_jobs_for_student (which drops
+    non-matching jobs entirely), this is a SOFT signal — a Mumbai-student
+    seeing a Bangalore job gets a lower score, not zero.
+    """
+    if not preferred_locations:
+        return 0.60  # no preference = neutral
+
+    if any(loc.lower().strip() == "any" for loc in preferred_locations):
+        return 0.60  # student accepts anywhere = neutral
+
+    job_loc_lower = (job_location or "").lower()
+
+    # Remote roles are always acceptable
+    if "remote" in job_loc_lower:
+        return 0.85
+
+    # Check if any preferred city appears in job location
+    for loc in preferred_locations:
+        if str(loc).lower().strip() in job_loc_lower:
+            return 1.0  # exact city match
+
+    return 0.10  # no match — penalise but don't zero out
 
 
 def _score_jobs(jobs: list, student: dict, roles: list, embed_fn) -> tuple[list[float], bool]:
     """
-    Hybrid scorer: blends three signals.
+    4-signal hybrid scorer.
 
-    Signal 1 — Title semantic (weight _W_TITLE):
-      cosine(profile_embedding, title_embedding)
-      Cached in _EMBED_CACHE keyed on (title, company).
+    Signal 1 — Semantic similarity (weight _W_SEMANTIC):
+      cosine(profile_embedding, title_embedding + JD_embedding)
+      Profile text is built from skills, roles, grad level.
 
-    Signal 2 — JD semantic (weight _W_JD):
-      cosine(profile_embedding, jd_embedding[:_JD_CHARS])
-      Only computed when description is non-empty; falls back to
-      the title score when description is absent so the weights
-      still add up to 1.0.
+    Signal 2 — Skills keyword overlap (weight _W_SKILLS):
+      Fraction of student.skills[] that appear as keywords in job title + description.
+      Direct, interpretable, and fast (no embedding needed).
 
-    Signal 3 — Keyword bonus (weight _W_KWORD):
-      Hard signals: role keyword match (+ROLE_BONUS) and intern match
-      (+INTERN_BONUS). Normalised to [0, 1] by dividing by their
-      maximum possible sum before blending.
+    Signal 3 — Experience compatibility (weight _W_EXP):
+      How well the role's seniority level matches the student's grad year.
+      1.0 = perfect level fit, 0.0 = completely wrong level.
 
-    Senior / non-tech penalty applied after blending.
+    Signal 4 — Location compatibility (weight _W_LOCATION):
+      How well the job location matches preferred_locations.
+      1.0 = exact city, 0.85 = remote, 0.10 = no match.
+
+    Non-tech hard zero still applied after blending.
     """
     current_year = datetime.now().year
     grad_year = student.get("graduation_year", current_year)
+    pref_locs = student.get("preferred_locations") or []
+    student_skills = student.get("skills") or []
 
     profile_text = _build_profile_text(student)
 
@@ -358,9 +496,7 @@ def _score_jobs(jobs: list, student: dict, roles: list, embed_fn) -> tuple[list[
 
     title_missing = [i for i, k in enumerate(title_cache_keys) if k not in _EMBED_CACHE]
 
-    # ── Build JD texts (truncated) ──────────────────────────────────────────
-    # We use a separate cache keyed on ("jd", title, company) so it
-    # doesn't collide with the title cache.
+    # ── Build JD texts (truncated) ───────────────────────────────────────────
     jd_texts: list[str] = []
     jd_cache_keys: list[tuple] = []
     for j in jobs:
@@ -371,7 +507,7 @@ def _score_jobs(jobs: list, student: dict, roles: list, embed_fn) -> tuple[list[
 
     jd_missing = [i for i, k in enumerate(jd_cache_keys) if jd_texts[i] and k not in _EMBED_CACHE]
 
-    # ── Batch embed: profile + missing titles + missing JDs ─────────────────
+    # ── Batch embed: profile + missing titles + missing JDs ──────────────────
     texts_to_embed = ([profile_text]
                       + [title_texts[i] for i in title_missing]
                       + [jd_texts[i]    for i in jd_missing])
@@ -381,64 +517,63 @@ def _score_jobs(jobs: list, student: dict, roles: list, embed_fn) -> tuple[list[
     if not fresh_embeddings or len(fresh_embeddings) < 1:
         logger.warning(
             "Local embedding model returned no data. "
-            "Falling back to keyword-only scoring — match scores will not reflect semantic similarity."
+            "Falling back to keyword-only scoring."
         )
         return _keyword_fallback_scores(jobs, roles, grad_year, current_year), True
 
     profile_emb = fresh_embeddings[0]
     fresh_rest   = fresh_embeddings[1:]
 
-    # Split fresh embeddings back into title vs JD batches
     title_fresh = fresh_rest[:len(title_missing)]
     jd_fresh    = fresh_rest[len(title_missing):]
 
     for idx, emb in zip(title_missing, title_fresh):
         _EMBED_CACHE[title_cache_keys[idx]] = emb
-
     for idx, emb in zip(jd_missing, jd_fresh):
         _EMBED_CACHE[jd_cache_keys[idx]] = emb
 
     # ── Compute per-job scores ────────────────────────────────────────────────
-    _max_kword = ROLE_BONUS + INTERN_BONUS  # normalisation denominator
     scores: list[float] = []
 
     for i, job in enumerate(jobs):
-        # Signal 1: title semantic
+        # Hard zero for non-tech roles — skip all other computation
+        if is_non_tech(job["title"]):
+            scores.append(0.0)
+            continue
+
+        title  = job["title"]
+        desc   = job.get("description") or ""
+        loc    = job.get("location", "")
+
+        # ── Signal 1: Semantic similarity ─────────────────────────────────────
         title_emb  = _EMBED_CACHE[title_cache_keys[i]]
         title_sim  = calculate_cosine_similarity(profile_emb, title_emb)
 
-        # Signal 2: JD semantic (only when description present)
         jd_key = jd_cache_keys[i]
         if jd_texts[i] and jd_key in _EMBED_CACHE:
-            jd_sim   = calculate_cosine_similarity(profile_emb, _EMBED_CACHE[jd_key])
-            # Blend title + JD: each gets its weight; re-normalise so
-            # the two semantic signals together sum to (_W_TITLE + _W_JD).
-            sem_score = (_W_TITLE * title_sim + _W_JD * jd_sim) / (_W_TITLE + _W_JD)
-            w_sem = _W_TITLE + _W_JD
+            jd_sim    = calculate_cosine_similarity(profile_emb, _EMBED_CACHE[jd_key])
+            sem_score = _W_TITLE * title_sim + _W_JD * jd_sim
         else:
-            # No JD → title carries the full semantic weight
             sem_score = title_sim
-            w_sem = 1.0  # normalise so kword still contributes _W_KWORD
 
-        # Signal 3: keyword bonus (normalised 0→1)
-        kword_raw = 0.0
-        if matches_role(job["title"], roles):
-            kword_raw += ROLE_BONUS
-        if grad_year >= current_year - 1 and is_internship(job):
-            kword_raw += INTERN_BONUS
-        kword_norm = kword_raw / _max_kword if _max_kword > 0 else 0.0
+        # ── Signal 2: Skills keyword overlap ──────────────────────────────────
+        skill_score = _skills_overlap_score(student_skills, title, desc)
 
-        # Blend: renormalise weights to sum to 1.0 when JD is absent
-        blended = (w_sem / (w_sem + _W_KWORD)) * sem_score \
-                + (_W_KWORD / (w_sem + _W_KWORD)) * kword_norm
+        # ── Signal 3: Experience compatibility ────────────────────────────────
+        exp_score = _experience_score(title, desc, grad_year, current_year)
 
-        # Penalties
-        if is_senior(job["title"], job.get("description", "")):
-            blended = max(0.0, blended - 0.10)
-        if is_non_tech(job["title"]):
-            blended = 0.0
+        # ── Signal 4: Location compatibility ──────────────────────────────────
+        loc_score = _location_score(loc, pref_locs)
 
-        scores.append(blended)
+        # ── Blend all 4 signals ───────────────────────────────────────────────
+        blended = (
+            _W_SEMANTIC  * sem_score   +
+            _W_SKILLS    * skill_score +
+            _W_EXP       * exp_score   +
+            _W_LOCATION  * loc_score
+        )
+
+        scores.append(round(blended, 4))
 
     return scores, False
 

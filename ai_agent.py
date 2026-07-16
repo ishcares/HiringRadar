@@ -2,6 +2,7 @@ import os
 import json
 import time
 from groq import Groq
+from dotenv import load_dotenv
 
 # Ensure environment variables are loaded
 load_dotenv()

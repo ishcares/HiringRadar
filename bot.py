@@ -1,5 +1,6 @@
 import os
 import asyncio
+from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.error import Forbidden, RetryAfter, TimedOut, NetworkError
 from telegram.ext import (
@@ -26,7 +27,7 @@ from db import (
     check_and_deactivate_dead_link,
 )
 from datetime import datetime
-from dotenv import load_dotenv
+
 from matching import (
     group_jobs,
     get_experience_tag,
@@ -36,7 +37,7 @@ from matching import (
     keyword_map,
 )
 from resume_parser import extract_text_from_pdf
-from ai_agent import evaluate_resume_for_job
+#from ai_agent import evaluate_resume_for_job
 
 load_dotenv()
 
@@ -1150,9 +1151,10 @@ async def handle_wizard_resume_pdf(update: Update, context: ContextTypes.DEFAULT
             return
             
         # 4. Generate Strict Evaluation using Gemini
-        evaluation_text = await asyncio.to_thread(
-            evaluate_resume_for_job, resume_text, job_title, job_company, job_description
-        )
+        #evaluation_text = await asyncio.to_thread(
+        #   evaluate_resume_for_job, resume_text, job_title, job_company, job_description
+        #)
+        evaluation_text = "⚠️ Resume evaluation is not live yet — coming soon!"
         
         # Save generated report directly to Supabase matching_queue
         try:

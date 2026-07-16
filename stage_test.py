@@ -70,7 +70,7 @@ def stage1_scoring():
         from matching import (
             _build_profile_text, _score_jobs, match_jobs_for_student,
             get_experience_tag, is_senior, is_non_tech, _EMBED_CACHE,
-            _W_TITLE, _W_JD, _W_KWORD,
+            _W_SEMANTIC, _W_SKILLS, _W_EXP, _W_LOCATION,
         )
         from embeddings import get_embeddings_from_hf
         ok("matching + embeddings imported successfully")
@@ -86,7 +86,7 @@ def stage1_scoring():
         "preferred_roles": ["backend"],
         "skills": ["Python", "Django", "PostgreSQL"],
         "job_type": "both",
-        "preferred_locations": ["any"],
+        "preferred_locations": ["Bangalore"],
     }
 
     # Check profile text
@@ -128,7 +128,7 @@ def stage1_scoring():
     )
     ok(f"Senior penalty: {scores[1]:.3f} < {scores[0]:.3f} (correct)")
 
-    info(f"Weights: title={_W_TITLE}, jd={_W_JD}, kword={_W_KWORD}")
+    info(f"Weights: sem={_W_SEMANTIC}, skills={_W_SKILLS}, exp={_W_EXP}, loc={_W_LOCATION}")
     return True
 
 

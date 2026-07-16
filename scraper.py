@@ -714,20 +714,19 @@ def get_all_jobs():
         ("Mindtickle",    "mindtickle"),
         ("fi.money",      "epifi"),
         ("FamPay",        "fampay"),
-        ("Coda",          "coda"),
-        ("Zepto",         "zepto"),
-        ("Yellow.ai",     "yellowmessenger"),
+       
+        
         ("JumpCloud",     "jumpcloud"),
         ("Pocket FM",     "pocketfm"),
         # Indian startups on Lever — slugs confirmed via lever.co/v0 API
         # To verify: curl -s "https://api.lever.co/v0/postings/<SLUG>?mode=json"
         # Do NOT add slugs here that return 404 or an empty list.
         # Remote-first companies on Lever
-        ("Doist",         "doist"),
-        ("Hotjar",        "hotjar"),
-        ("Maze",          "maze"),
-        ("Linear",        "linear"),
-        ("Veritas",       "veritas"),
+        
+        ("contentSquare",        "contentsquare"),
+        
+        
+        
     ]:
         try:
             jobs = scrape_lever(name, slug)
@@ -740,13 +739,11 @@ def get_all_jobs():
     # ── Workday ───────────────────────────────────────────────────────────────
     for name, tenant, board, wd in [
         ("Salesforce",    "salesforce", "External_Career_Site",      12),
-        ("Samsung",       "sec",        "samsungcareers",             12),
-        ("Atlassian",     "atlassian",  "AtlassianCareers",           12),
+        ("Samsung",       "sec",        "samsungcareers",             3),
+       
         # Finance / Big Tech on Workday
         ("Nvidia",        "nvidia",     "NVIDIAExternalCareerSite",    5),
-        ("JP Morgan",     "jpmc",       "External_Career_Site",        1),
-        ("Goldman Sachs", "gs",         "External_Career_Site",        1),
-        ("Microsoft",     "microsoft",  "External",                    5),
+        ("Cohesity", "cohesity", "Cohesity_Careers", 5),                 
     ]:
         try:
             jobs = scrape_workday(name, tenant, board, wd)
@@ -761,6 +758,8 @@ def get_all_jobs():
         ("Superhuman",  "superhuman"),
         ("PostHog",     "posthog"),
         ("Notion",      "notion"),
+        ("Linear",        "linear"),
+        ("Maze",          "maze"),
         # NOTE: Pika/Perplexity/Anduril removed — unconfirmed Ashby tokens
         # and minimal India hiring. Add back only after verifying:
         #   curl -s "https://api.ashbyhq.com/v1/iframe/web/jobs?jobBoardId=<TOKEN>"
