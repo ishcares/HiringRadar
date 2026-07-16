@@ -35,7 +35,10 @@ def execute_gemini_with_retry(prompt: str, model_name: str = 'gemini-2.5-flash',
                 model=model_name,
                 contents=prompt,
             )
-            return response.text.strip()
+            text = (response.text or "").strip()
+            if not text:
+                raise ValueError("Gemini returned an empty response (possible safety block or quota soft-limit).")
+            return text
         except Exception as e:
             # Check for API rate limiting or unavailable errors
             err_str = str(e)
@@ -165,6 +168,10 @@ Resume text:
 
         # Strip trailing commas before } or ] (Gemini 2.5-flash emits these)
         text = re.sub(r",\s*([}\]])", r"\1", text)
+
+        if not text:
+            print("Error parsing resume structured data: Gemini returned empty text after cleanup.")
+            return {}
 
         result = json.loads(text)
         if isinstance(result, dict):
