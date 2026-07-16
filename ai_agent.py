@@ -22,7 +22,7 @@ def _get_client():
             print(f"Gemini client init failed: {e}")
     return _gemini_client
 
-def execute_gemini_with_retry(prompt: str, model_name: str = 'gemini-2.5-flash', max_retries: int = 3) -> str:
+def execute_gemini_with_retry(prompt: str, model_name: str = 'gemini-3.1-flash-lite', max_retries: int = 3) -> str:
     """Executes a Gemini generation call with exponential back-off retries to handle 429/503 errors."""
     client = _get_client()
     if not client:
