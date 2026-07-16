@@ -66,6 +66,7 @@ Job Description:
 def extract_skills_from_jd(title: str, company: str, description: str) -> dict:
     """
     Extract structured skills from a job description using Gemini.
+    Includes exponential backoff to handle 429 Resource Exhausted rate limits.
 
     Returns:
         {"required_skills": [...], "preferred_skills": [...]}
@@ -77,33 +78,48 @@ def extract_skills_from_jd(title: str, company: str, description: str) -> dict:
 
     prompt = _EXTRACT_PROMPT.format(description=description[:2500])
 
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt,
-        )
-        text = (response.text or "").strip()
+    import time
+    max_retries = 3
+    delay = 5.0
 
-        # Strip markdown code fences if present
-        text = re.sub(r"^```(?:json)?\s*", "", text)
-        text = re.sub(r"\s*```$", "", text)
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+            )
+            text = (response.text or "").strip()
 
-        result = json.loads(text)
+            # Strip markdown code fences if present
+            text = re.sub(r"^```(?:json)?\s*", "", text)
+            text = re.sub(r"\s*```$", "", text)
 
-        # Validate structure
-        required  = result.get("required_skills", [])
-        preferred = result.get("preferred_skills", [])
-        if not isinstance(required, list) or not isinstance(preferred, list):
-            raise ValueError("Invalid structure")
+            result = json.loads(text)
 
-        return {"required_skills": required, "preferred_skills": preferred}
+            # Validate structure
+            required  = result.get("required_skills", [])
+            preferred = result.get("preferred_skills", [])
+            if not isinstance(required, list) or not isinstance(preferred, list):
+                raise ValueError("Invalid structure")
 
-    except json.JSONDecodeError as e:
-        logger.warning("JD skill extraction JSON error for '%s' @ %s: %s", title, company, e)
-        return {}
-    except Exception as e:
-        logger.warning("JD skill extraction failed for '%s' @ %s: %s", title, company, e)
-        return {}
+            return {"required_skills": required, "preferred_skills": preferred}
+
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "exhausted" in err_str.lower():
+                logger.warning(
+                    "Gemini API rate limit (429) on attempt %d/%d for '%s' @ %s. Retrying in %.1fs...",
+                    attempt + 1, max_retries, title, company, delay
+                )
+                time.sleep(delay)
+                delay *= 2.5  # exponential backoff
+                continue
+            
+            logger.warning("JD skill extraction failed for '%s' @ %s: %s", title, company, e)
+            return {}
+
+    logger.error("Gemini API rate limit exceeded after %d retries for '%s' @ %s.", max_retries, title, company)
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -128,7 +144,7 @@ def get_jobs_pending_extraction(batch_size: int = 40) -> list[dict]:
             sb.table("jobs_cache")
             .select("id, title, company, description")
             .eq("is_active", True)
-            .is_("required_skills", "null")
+            .or_("required_skills.is.null,required_skills.eq.[]")
             .neq("description", "")
             .not_.is_("description", "null")
             .order("scraped_at", desc=True)

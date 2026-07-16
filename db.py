@@ -294,6 +294,7 @@ def upsert_jobs_cache(jobs: list[dict]) -> int:
             "url":        job["url"],
             "category":   job.get("category", "tech"),
             "is_active":  True,
+            "remote_class": job.get("remote_class", "india"),
         }
         for job in jobs
     ]
@@ -312,7 +313,7 @@ def get_cached_jobs(delay_hours: int = 0) -> list[dict]:
     If delay_hours is specified, only returns jobs scraped at least delay_hours ago.
     """
     try:
-        query = supabase.table("jobs_cache").select("id, company, title, location, url, scraped_at, category,description").eq("is_active", True)
+        query = supabase.table("jobs_cache").select("id, company, title, location, url, scraped_at, category, description, remote_class").eq("is_active", True)
         res = query.execute()
         jobs = res.data or []
         

@@ -26,31 +26,76 @@ def is_india_location(location: str) -> bool:
         "hyderabad", "pune", "chennai", "noida", "gurgaon",
         "gurugram", "kolkata",
     ]
-    if any(k in location_lower for k in india_keywords):
+    has_india = any(k in location_lower for k in india_keywords)
+    if has_india:
         return True
 
-    # Remote → always India-accessible ✅ (checked before blocklist so
-    # "Canada (Remote)" style postings still pass, same as original intent)
+    # Check for foreign countries/cities to block them even if they mention 'remote'
+    # e.g., "Remote - USA", "Fully remote - Canada", "London (Remote)"
+    foreign_blocklist = [
+        "usa", "united states", "america", "canada", "london", "uk", "united kingdom",
+        "europe", "singapore", "malaysia", "germany", "france", "turkey", "turkiye", "türkiye"
+    ]
+    # If it lists a foreign country and doesn't explicitly mention India, block it
+    if any(f in location_lower for f in foreign_blocklist):
+        # Allow only if it is a multi-location post that also includes India
+        return False
+
+    # Remote → always India-accessible ✅
     remote_keywords = ["remote", "work from anywhere", "worldwide", "wfh"]
     if any(r in location_lower for r in remote_keywords):
         return True
 
-    # Hard blocklist — only reached if no India keyword and no remote
-    # keyword matched above. e.g. "Toronto, Canada" with no remote mention.
+    # Hard blocklist — only reached if no India keyword and no remote keyword matched above
     hard_blocklist = [
         "malaysia", "singapore", "united states", "us, ", " usa",
         "london", "uk,", "europe", "canada",
         "new york", "san francisco", "seattle",
-        # Turkey — ASCII and Unicode variants
         "turkiye", "türkiye", "turkey", "ankara", "istanbul",
         # Other non-India, non-remote countries
         "berlin", "amsterdam", "dubai", "uae", "japan", "china",
-        "brazil", "mexico", "france", "germany", "poland", "romania",
     ]
     if any(b in location_lower for b in hard_blocklist):
         return False
 
     return False
+
+
+INELIGIBLE_PROGRAM_KEYWORDS = [
+    "skillbridge", "dod skillbridge", "active duty service member",
+    "active duty military", "transitioning service member",
+    "military spouse fellowship",
+]
+
+def is_program_restricted(title: str, description: str = "") -> bool:
+    """Blocks listings tied to eligibility programs Indian candidates can't apply to
+    (e.g. DoD SkillBridge, which requires active-duty US military status)."""
+    text = f"{title} {description}".lower()
+    return any(kw in text for kw in INELIGIBLE_PROGRAM_KEYWORDS)
+
+
+def get_remote_class(location: str) -> str:
+    """
+    Classifies a location that already PASSED is_india_location() into:
+    - 'india'          : explicit India city/country mentioned
+    - 'remote_unclear'  : passed only because it said "remote"/"worldwide"/"wfh"
+                          with NO country stated — could be US-only, EU-only, etc.
+                          Do not treat as equivalent to a confirmed India role.
+    """
+    if not location:
+        return "remote_unclear"
+    loc = location.lower()
+    india_keywords = [
+        "india", "bangalore", "bengaluru", "mumbai", "delhi",
+        "hyderabad", "pune", "chennai", "noida", "gurgaon",
+        "gurugram", "kolkata",
+    ]
+    if any(k in loc for k in india_keywords):
+        return "india"
+    remote_keywords = ["remote", "work from anywhere", "worldwide", "wfh"]
+    if any(r in loc for r in remote_keywords):
+        return "remote_unclear"
+    return "india"
 
 
 def is_relevant(title):
@@ -218,6 +263,11 @@ def scrape_workday(company_name, tenant, job_board, wd_num=1):
                 continue
             external_path = job.get("externalPath", "")
             job_url = f"{apply_base}{external_path}"
+            
+            # Block program-restricted listings (DoD SkillBridge, etc.)
+            if is_program_restricted(title):
+                continue
+                
             # Workday list API does not expose full job descriptions.
             relevant.append({
                 "company": company_name,
@@ -226,6 +276,7 @@ def scrape_workday(company_name, tenant, job_board, wd_num=1):
                 "url": job_url,
                 "category": category,
                 "description": "",
+                "remote_class": get_remote_class(location),
             })
 
         # Stop paginating if we got fewer results than the page size
@@ -287,6 +338,11 @@ def scrape_smartrecruiters(company_name: str, company_id: str):
             job_url = (
                 f"https://jobs.smartrecruiters.com/{company_id}/{job_id}"
             )
+            
+            # Block program-restricted listings
+            if is_program_restricted(title):
+                continue
+                
             # SmartRecruiters posting list does not include full descriptions.
             relevant.append({
                 "company": company_name,
@@ -295,6 +351,7 @@ def scrape_smartrecruiters(company_name: str, company_id: str):
                 "url": job_url,
                 "category": category,
                 "description": "",
+                "remote_class": get_remote_class(location),
             })
 
         # Paginate until exhausted
@@ -338,10 +395,11 @@ def scrape_greenhouse_json(company_name, board_token):
         if not is_india_location(location):
             continue
         job_url = job.get("absolute_url", "")
-        # Greenhouse list API does not include job descriptions.
-        # Fetching each job's detail page is too slow (~N * 1s RTT).
-        # The description field stays empty here and is enriched later
-        # once we have a matching candidate (or via a background detail fetch).
+        
+        # Block program-restricted listings
+        if is_program_restricted(title):
+            continue
+            
         relevant.append({
             "company": company_name,
             "title": title,
@@ -349,6 +407,7 @@ def scrape_greenhouse_json(company_name, board_token):
             "url": job_url,
             "category": category,
             "description": "",
+            "remote_class": get_remote_class(location),
         })
     return relevant
 
@@ -395,6 +454,11 @@ def scrape_lever(company_name, company_slug):
              continue
         job_url = job.get("hostedUrl", "")
         description = job.get("descriptionPlain", "") or job.get("description", "")
+        
+        # Block program-restricted listings (lever has full description text available)
+        if is_program_restricted(title, description):
+            continue
+            
         relevant.append({
             "company": company_name,
             "title": title,
@@ -402,6 +466,7 @@ def scrape_lever(company_name, company_slug):
             "url": job_url,
             "category": category,
             "description": description, 
+            "remote_class": get_remote_class(location),
         })
     return relevant
 
@@ -422,6 +487,11 @@ def scrape_ashby(company_name, company_token):
                 if not is_india_location(location):
                     continue
                 description = j.get('descriptionPlain', '') or j.get('descriptionHtml', '') or ''
+                
+                # Block program-restricted listings (Ashby API lists description)
+                if is_program_restricted(title, description):
+                    continue
+                    
                 relevant.append({
                     "company": company_name,
                     "title": title,
@@ -429,6 +499,7 @@ def scrape_ashby(company_name, company_token):
                     "url": j.get('jobUrl', ''),
                     "category": category,
                     "description": description,
+                    "remote_class": get_remote_class(location),
                 })
             return relevant
     except Exception as e:
@@ -456,6 +527,11 @@ def scrape_ashby(company_name, company_token):
                     # Ashby HTML board doesn't expose location without a subpage crawl.
                     # We accept all listings here — the detail page fetch (if added later)
                     # can refine the location. For now we tag as Remote / India.
+                    
+                    # Block program-restricted listings
+                    if is_program_restricted(title):
+                        continue
+                        
                     relevant.append({
                         "company": company_name,
                         "title": title,
@@ -463,6 +539,7 @@ def scrape_ashby(company_name, company_token):
                         "url": job_url,
                         "category": category,
                         "description": "",
+                        "remote_class": "india",  # Hardcoded fallback target matching
                     })
             return relevant
     except Exception as e:
@@ -498,6 +575,10 @@ def scrape_keka(company_name, tenant):
                         if not is_india_location(parent_text):
                             continue
                             
+                    # Block program-restricted listings
+                    if is_program_restricted(title):
+                        continue
+                        
                     # Keka HTML board does not include job descriptions inline.
                     relevant.append({
                         "company": company_name,
@@ -506,6 +587,7 @@ def scrape_keka(company_name, tenant):
                         "url": job_url,
                         "category": category,
                         "description": "",
+                        "remote_class": get_remote_class(location),
                     })
             return relevant
     except Exception as e:
@@ -544,6 +626,10 @@ def scrape_icims(company_name, customer_token):
                     if not is_india_location(location):
                         continue
                             
+                    # Block program-restricted listings
+                    if is_program_restricted(title):
+                        continue
+                            
                     # iCIMS HTML board does not include job descriptions inline.
                     relevant.append({
                         "company": company_name,
@@ -552,6 +638,7 @@ def scrape_icims(company_name, customer_token):
                         "url": job_url,
                         "category": category,
                         "description": "",
+                        "remote_class": get_remote_class(location),
                     })
             return relevant
     except Exception as e:
@@ -626,6 +713,10 @@ def scrape_amazon(max_results: int = 300) -> list[dict]:
             import re as _re
             description = _re.sub(r"<[^>]+>", " ", raw_desc).strip()
 
+            # Block program-restricted listings
+            if is_program_restricted(title, description):
+                continue
+
             relevant.append({
                 "company":     "Amazon",
                 "title":       title,
@@ -633,6 +724,7 @@ def scrape_amazon(max_results: int = 300) -> list[dict]:
                 "url":         job_url,
                 "category":    category,
                 "description": description,
+                "remote_class": get_remote_class(location),
             })
 
         if len(jobs) < page_size:

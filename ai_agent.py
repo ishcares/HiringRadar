@@ -1,17 +1,30 @@
 import os
 import json
 import time
-from groq import Groq
 from dotenv import load_dotenv
+import re
 
 # Ensure environment variables are loaded
 load_dotenv()
 
 # Configure Gemini Client
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+_gemini_client = None
 
-def execute_gemini_with_retry(prompt: str, model_name: str = 'gemini-3.5-flash', max_retries: int = 3) -> str:
+def _get_client():
+    global _gemini_client
+    if _gemini_client is None:
+        try:
+            from google import genai
+            key = os.getenv("GEMINI_API_KEY")
+            if key:
+                _gemini_client = genai.Client(api_key=key)
+        except Exception as e:
+            print(f"Gemini client init failed: {e}")
+    return _gemini_client
+
+def execute_gemini_with_retry(prompt: str, model_name: str = 'gemini-2.5-flash', max_retries: int = 3) -> str:
     """Executes a Gemini generation call with exponential back-off retries to handle 429/503 errors."""
+    client = _get_client()
     if not client:
         return ""
         
@@ -96,38 +109,74 @@ JSON output format:
         }
 
 
-def parse_skills_from_resume(resume_text: str) -> list[str]:
-    """Uses Gemini to extract a clean list of technical skills from a raw resume text."""
-    prompt = f"""
-You are a technical resume parser. Read the raw resume text below and extract a list of all technical programming languages, frameworks, databases, and development tools mentioned.
+def parse_skills_from_resume(resume_text: str) -> dict:
+    """Uses Gemini to extract structured profile data from a raw resume text."""
+    prompt = f"""You are extracting structured data from a resume for a job-matching tool. Return ONLY valid JSON. No markdown fences, no prose before or after, no comments.
 
---- RESUME TEXT ---
+STRICT RULE — READ CAREFULLY:
+Only extract a skill, tool, or technology if the EXACT term (or a direct alias) appears
+literally in the text below. Never infer related or implied technologies.
+- If the resume says "built a REST API," extract "REST API" only — do NOT add "Node.js,"
+  "Express," or "Postman" unless those exact words appear elsewhere in the text.
+- If the resume says "worked with databases," extract "databases" only — do NOT add
+  "PostgreSQL," "MongoDB," or any specific database engine unless named explicitly.
+- If unsure whether something counts as an explicit mention, leave it out. Under-extraction
+  is safe; over-extraction is a serious error that misleads the candidate.
+
+Extract these fields:
+
+1. "skills": array of strings. Technical skills/tools/languages/frameworks explicitly named
+   anywhere in the resume (skills section, project bullets, experience bullets). Normalize
+   only exact aliases (e.g. "ReactJS" -> "React", "Node" -> "Node.js", "Py" is NOT a valid
+   alias for "Python" — do not guess abbreviations). Deduplicate.
+
+2. "projects": array of objects, each:
+   {{"name": string, "tech_stack": array of strings (explicit only, same rule as above),
+     "summary": string, max 15 words, in your own words}}
+
+3. "experience_years": number. Sum of professional (full-time or paid part-time) experience
+   only. Internships count as 0 toward this unless the resume itself frames them as full-time
+   professional roles. If the resume is clearly a student/fresher resume with no professional
+   roles, return 0.
+
+4. "education_level": one of ["Undergraduate", "Postgraduate", "PhD"] — based on the highest
+   degree in progress or completed.
+
+5. "certifications": array of strings. Only formally named certifications or credentials
+   (e.g. "AWS Certified Cloud Practitioner"). Do NOT include short online courses mentioned
+   in passing (e.g. "completed a course on X") unless the resume explicitly calls it a
+   certification or credential.
+
+6. "years_since_graduation": number or null. Null if still enrolled / no graduation date stated.
+
+If a field cannot be determined from the text, use an empty array, 0, or null as appropriate —
+never fabricate a plausible-sounding value.
+
+Resume text:
 {resume_text}
-
---- INSTRUCTIONS ---
-Output a raw JSON array of strings containing the lowercase names of the skills (e.g. ["python", "reactjs", "postgresql", "docker"]).
-Output ONLY the raw JSON array (no markdown code blocks, no backticks, no other text).
 """
 
     try:
         text = execute_gemini_with_retry(prompt)
-        
-        # Clean markdown wrappers if present
-        if text.startswith("```"):
-            lines = text.split("\n")
-            if lines[0].startswith("```json") or lines[0].startswith("```"):
-                lines = lines[1:]
-            if lines[-1].strip() == "```":
-                lines = lines[:-1]
-            text = "\n".join(lines).strip()
-            
+
+        # Strip markdown code fences (handles ```json ... ``` or ``` ... ```)
+        text = re.sub(r"^```(?:json)?\s*", "", text.strip())
+        text = re.sub(r"\s*```$", "", text).strip()
+
+        # Strip trailing commas before } or ] (Gemini 2.5-flash emits these)
+        text = re.sub(r",\s*([}\]])", r"\1", text)
+
         result = json.loads(text)
-        if isinstance(result, list):
-            return [str(s).lower().strip() for s in result]
-        return []
+        if isinstance(result, dict):
+            # Normalize skills to lowercase
+            skills = result.get("skills", [])
+            if isinstance(skills, list):
+                result["skills"] = [str(s).lower().strip() for s in skills]
+            return result
+        return {}
     except Exception as e:
-        print(f"Error parsing resume skills: {e}")
-        return []
+        print(f"Error parsing resume structured data: {e}")
+        return {}
 
 
 def generate_roadmap_from_live_jobs(student_skills: list[str], target_category: str, live_jobs: list) -> dict:
@@ -193,35 +242,112 @@ JSON output format:
             "resume_hook": "Developed a full-stack platform optimizing database query times and enabling containerized deployment."
         }
 
+def compute_gap_analysis(resume_data: dict, jd_data: dict) -> dict:
+    """Deterministic skill and experience overlap matcher."""
+    resume_skills = {s.lower().strip() for s in resume_data.get("skills", [])}
+    required = {s.lower().strip() for s in jd_data.get("required_skills", [])}
+    preferred = {s.lower().strip() for s in jd_data.get("preferred_skills", [])}
+
+    ALIASES = {
+        "react": {"reactjs", "react.js"},
+        "node": {"nodejs", "node.js"},
+        "vue": {"vuejs", "vue.js"},
+        "angular": {"angularjs"},
+        "next": {"nextjs", "next.js"},
+        "postgres": {"postgresql"},
+        "mongo": {"mongodb"},
+        "docker": {"dockerfile"},
+        "k8s": {"kubernetes"},
+    }
+
+    def _canonical(term):
+        for canon, aliases in ALIASES.items():
+            if term == canon or term in aliases:
+                return canon
+        return term
+
+    def fuzzy_match(skill_set_a, skill_set_b):
+        canon_b = {_canonical(b): b for b in skill_set_b}
+        matched = set()
+        for a in skill_set_a:
+            if _canonical(a) in canon_b:
+                matched.add(a)
+        return matched
+
+    matched_required = fuzzy_match(required, resume_skills)
+    matched_preferred = fuzzy_match(preferred, resume_skills)
+    missing_required = required - matched_required
+
+    required_pct = len(matched_required) / len(required) if required else 1.0
+
+    exp_gap = None
+    min_exp = jd_data.get("min_experience_years", 0)
+    res_exp = resume_data.get("experience_years", 0)
+    if min_exp > res_exp:
+        exp_gap = min_exp - res_exp
+
+    return {
+        "required_match_pct": round(required_pct * 100),
+        "matched_required": sorted(matched_required),
+        "missing_required": sorted(missing_required),
+        "matched_preferred": sorted(matched_preferred),
+        "experience_gap_years": exp_gap,
+    }
+
+
 def evaluate_resume_for_job(resume_text: str, job_title: str, company: str, job_description: str) -> str:
-    """Evaluates candidate resume against job description using strict recruiter grading rules."""
-    prompt = f"""
-You are a strict Corporate Technical Recruiter and an automated ATS Parser filtering entry-level engineering applications for top-tier technology firms. Evaluate the provided Candidate Resume against the target Job Description.
+    """Evaluates candidate resume using deterministic skill comparison and low-cost LLM advice generation."""
+    # 1. Structured parse of the candidate resume
+    resume_data = parse_skills_from_resume(resume_text)
+    
+    # 2. Structured parse of the JD description (mocking structure if not in DB yet)
+    # Extract JD required and preferred skills using our existing jd_skill_extractor prompt format
+    from jd_skill_extractor import extract_skills_from_jd
+    jd_data = extract_skills_from_jd(job_title, company, job_description)
+    if not jd_data:
+        jd_data = {"required_skills": [], "preferred_skills": []}
 
-Calculate a highly realistic market match score based on a maximum of 100 points, strictly penalizing missing infrastructure tools, superficial skill listings, or project scope mismatches.
+    # 3. Deterministic Overlap calculation
+    gaps = compute_gap_analysis(resume_data, jd_data)
+    
+    # 4. LLM-generated concrete advice
+    missing_req = gaps["missing_required"]
+    matched_req = gaps["matched_required"]
+    exp_gap = gaps["experience_gap_years"] or 0
+    
+    advice_prompt = f"""A student is deciding whether and how to apply for a specific job. You have their
+verified skill gap versus this job's requirements. Write exactly 2-3 sentences of advice.
 
-Apply these hard rules:
-1. If the Job Description explicitly lists a critical stack element (e.g., Docker, Redis, Kubernetes, AWS) and the resume only lists standard MERN framework elements with zero infrastructure projects, automatically deduct 20 points.
-2. If the candidate lists skills in a "Technical Skills" section but fails to implement them inside their listed projects, reduce the Hard Skill Alignment score by 50%.
-3. Grade the projects on structural depth: Simple CRUD or tutorial-based apps get a maximum score of 10/20 for project depth. Systems with architectural complexity (JWT rotation, containerization, microservices) get full points.
+Matched required skills: {matched_req}
+Missing required skills: {missing_req}
+Matched preferred skills: {gaps["matched_preferred"]}
+Experience gap: {gaps["experience_gap_years"]} years (null if none)
 
---- CANDIDATE RESUME ---
-{resume_text}
-
---- TARGET JOB DESCRIPTION ---
-Company: {company}
-Role: {job_title}
-Details:
-{job_description}
-
-Return the evaluation strictly in this format:
-- Match Score: [X]%
-- Critical Stack Gaps: [List maximum 3 missing technical keywords/concepts]
-- Project Scope Assessment: [1 sentence on whether their projects match live market demands]
+Rules:
+- Reference the actual skill names given above. Never invent a skill not in these lists.
+- Do not give generic encouragement ("you can do it!", "consider upskilling"). Be specific:
+  name which single missing skill to prioritize first, and briefly say why — e.g. because it's
+  foundational to the others they already have, or because it's the most commonly-required
+  gap for this role type.
+- If missing_required is empty, say so plainly and note they're a strong match on paper.
+- Do not comment on experience_gap_years unless it is not null.
+- Keep tone direct and practical, not motivational-poster language.
 """
+    
+    advice = "Continue focusing on building projects using your core stack."
     try:
-        text = execute_gemini_with_retry(prompt, model_name='gemini-3.5-flash')
-        return text
+        advice = execute_gemini_with_retry(advice_prompt)
     except Exception as e:
-        print(f"Error in strict resume evaluation: {e}")
-        return f"Error evaluating resume: {e}"
+        print(f"Error generating advice: {e}")
+
+    # Format the unified, explainable card
+    matched_str = ", ".join(matched_req) if matched_req else "None detected"
+    missing_str = ", ".join(missing_req) if missing_req else "None detected"
+    
+    report = (
+        f"- Match Score: {gaps['required_match_pct']}%\n"
+        f"- Matched Skills: {matched_str}\n"
+        f"- Critical Stack Gaps: {missing_str}\n"
+        f"- Recruiter Advice:\n{advice}"
+    )
+    return report

@@ -36,8 +36,9 @@ from matching import (
     build_match_reason,
     keyword_map,
 )
-from resume_parser import extract_text_from_pdf
-#from ai_agent import evaluate_resume_for_job
+from resume_ingest import extract_resume_text_from_path
+from jd_skill_extractor import extract_jd_skills_job
+from ai_agent import evaluate_resume_for_job
 
 load_dotenv()
 
@@ -76,9 +77,13 @@ def format_job_card(job: dict, grad_year: int = 2026, score: float = 0.0, studen
     exp = get_experience_tag(job['title'], desc)
     time_ago = get_time_ago_string(job.get('scraped_at'))
 
+    loc_str = job.get('location', 'Not specified')
+    if job.get('remote_class') == 'remote_unclear':
+        loc_str = "🌍 Remote (unverified location — check listing before applying)"
+
     lines = [
         f"🏢 *{job['company']}* — {job['title']}",
-        f"📍 {job['location']} · {exp} · {time_ago}",
+        f"📍 {loc_str} · {exp} · {time_ago}",
     ]
 
     if score > 0:
@@ -1142,7 +1147,7 @@ async def handle_wizard_resume_pdf(update: Update, context: ContextTypes.DEFAULT
         await new_file.download_to_drive(local_path)
         
         # Read text and delete local file instantly
-        resume_text = await asyncio.to_thread(extract_text_from_pdf, local_path)
+        resume_text = await asyncio.to_thread(extract_resume_text_from_path, local_path)
         if os.path.exists(local_path):
             os.remove(local_path)
             
@@ -1151,10 +1156,9 @@ async def handle_wizard_resume_pdf(update: Update, context: ContextTypes.DEFAULT
             return
             
         # 4. Generate Strict Evaluation using Gemini
-        #evaluation_text = await asyncio.to_thread(
-        #   evaluate_resume_for_job, resume_text, job_title, job_company, job_description
-        #)
-        evaluation_text = "⚠️ Resume evaluation is not live yet — coming soon!"
+        evaluation_text = await asyncio.to_thread(
+            evaluate_resume_for_job, resume_text, job_title, job_company, job_description
+        )
         
         # Save generated report directly to Supabase matching_queue
         try:
@@ -1271,14 +1275,15 @@ def create_app(token):
     app.add_handler(MessageHandler(filters.Document.PDF, handle_wizard_resume_pdf))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, forward_to_admin))
 
-    # ── Two separate scheduled jobs ─────────────────────────────────────────
     # scrape_job: every 5 min — hits ATS APIs, writes to jobs_cache
     # alert_job:  every 2 min — reads from jobs_cache, sends Telegram messages
+    # extract_skills_job: every 30 min — extracts JD technical skills using Gemini
     #
     # first=10 means scrape_job fires 10s after bot starts (cache gets populated).
     # first=30 gives scrape_job time to fill the cache before alerts run.
-    app.job_queue.run_repeating(scrape_job, interval=300, first=10)
-    app.job_queue.run_repeating(alert_job,  interval=120, first=30)
+    app.job_queue.run_repeating(scrape_job,             interval=300,  first=10)
+    app.job_queue.run_repeating(alert_job,              interval=120,  first=30)
+    app.job_queue.run_repeating(extract_jd_skills_job,  interval=1800, first=60)
 
     return app
 
