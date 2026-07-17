@@ -25,7 +25,7 @@ def _get_client():
 FAST_MODEL = "gemini-3.5-flash"
 SMART_MODEL = "gemini-3.5-flash"
 
-def execute_gemini_with_retry(prompt: str, model_name: str = FAST_MODEL, max_retries: int = 3) -> str:
+def execute_gemini_with_retry(prompt: str, model_name: str = FAST_MODEL, max_retries: int = 5) -> str:
     """Executes a Gemini generation call with exponential back-off retries to handle 429/503 errors."""
     client = _get_client()
     if not client:
@@ -43,21 +43,15 @@ def execute_gemini_with_retry(prompt: str, model_name: str = FAST_MODEL, max_ret
                 raise ValueError("Gemini returned an empty response (possible safety block or quota soft-limit).")
             return text
         except Exception as e:
-            # Check for API rate limiting or unavailable errors
-            err_str = str(e)
-            if "429" in err_str or "503" in err_str or "RESOURCE_EXHAUSTED" in err_str:
-                print(f"Gemini API rate limited/unavailable (attempt {attempt+1}/{max_retries}). Retrying in {delay}s...")
+            print(f"Gemini API call failed (attempt {attempt+1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                print(f"Retrying in {delay}s...")
                 time.sleep(delay)
                 delay *= 2  # Exponentially double the wait time
             else:
-                # If it's a different error, raise it
                 raise e
-    # If all retries fail, execute one final attempt (which will raise the exception if it fails)
-    response = client.models.generate_content(
-        model=model_name,
-        contents=prompt,
-    )
-    return response.text.strip()
+    # If all retries fail, raise the last exception
+    raise RuntimeError("All Gemini API retries failed.")
 
 
 def generate_gap_critique_and_pitch(resume_text: str, job_title: str, company: str, job_description: str) -> dict:
@@ -252,6 +246,13 @@ JSON output format:
             "resume_hook": "Developed a full-stack platform optimizing database query times and enabling containerized deployment."
         }
 
+def compute_skills_match(required_skills: list | set, matched_skills: list | set) -> float:
+    """Computes skills match percentage, returning 0.0 if required_skills is empty."""
+    if not required_skills:
+        return 0.0
+    return len(matched_skills) / len(required_skills)
+
+
 def compute_gap_analysis(resume_data: dict, jd_data: dict) -> dict:
     """Deterministic multi-signal skill and experience overlap matcher."""
     resume_skills = {s.lower().strip() for s in resume_data.get("skills", [])}
@@ -294,7 +295,7 @@ def compute_gap_analysis(resume_data: dict, jd_data: dict) -> dict:
     missing_required = required - matched_required
 
     # Signal 1: Required skills match (0–1.0)
-    required_pct = len(matched_required) / len(required) if required else 1.0
+    required_pct = compute_skills_match(required, matched_required)
 
     # Signal 2: Experience gap
     exp_gap = None

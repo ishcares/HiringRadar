@@ -305,7 +305,7 @@ def _filter_fresher_jobs(jobs: list, grad_year: int, current_year: int, student_
         if get_experience_tag(j["title"], j.get("description") or "") not in non_fresher_tags
         and j not in fresher_jobs
     ]
-    return fresher_jobs if fresher_jobs else generic_ok
+    return fresher_jobs + generic_ok
 
 
 def _keyword_fallback_scores(jobs: list, roles: list, grad_year: int, current_year: int) -> list[float]:

@@ -119,8 +119,8 @@ def extract_skills_from_jd(title: str, company: str, description: str) -> dict:
     prompt = _EXTRACT_PROMPT.format(description=description[:15000])
 
     import time
-    max_retries = 3
-    delay = 5.0
+    max_retries = 5
+    delay = 3.0
 
     for attempt in range(max_retries):
         try:
@@ -166,20 +166,18 @@ def extract_skills_from_jd(title: str, company: str, description: str) -> dict:
             }
 
         except Exception as e:
-            err_str = str(e)
-            if "429" in err_str or "exhausted" in err_str.lower() or "limit" in err_str.lower():
-                logger.warning(
-                    "Gemini API rate limit (429) on attempt %d/%d for '%s' @ %s. Retrying in %.1fs...",
-                    attempt + 1, max_retries, title, company, delay
-                )
+            logger.warning(
+                "Gemini call failed (attempt %d/%d) for '%s' @ %s: %s",
+                attempt + 1, max_retries, title, company, e
+            )
+            if attempt < max_retries - 1:
+                logger.info("Retrying in %.1fs...", delay)
                 time.sleep(delay)
-                delay *= 2.5  # exponential backoff
-                continue
-            
-            logger.warning("JD skill extraction failed for '%s' @ %s: %s", title, company, e)
-            return {}
+                delay *= 2.0  # exponential backoff
+            else:
+                logger.error("All retries failed for '%s' @ %s.", title, company)
+                return {}
 
-    logger.error("Gemini API rate limit exceeded after %d retries for '%s' @ %s.", max_retries, title, company)
     return {}
 
 

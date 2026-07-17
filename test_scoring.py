@@ -36,7 +36,7 @@ from matching import (
     get_experience_tag,
     build_match_reason,
     _expand_title,
-    _W_TITLE, _W_JD, _W_KWORD, _JD_CHARS,
+    _W_TITLE, _W_JD, _W_SKILLS, _JD_CHARS,
     ROLE_BONUS, INTERN_BONUS,
     matches_role, is_internship, is_senior, is_non_tech,
     _EMBED_CACHE,
@@ -212,11 +212,10 @@ def _strip_emoji(text: str) -> str:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Main test runner
-# ──────────────────────────────────────────────────────────────────────────────
+def run_tests():
     print("=" * 70)
     print("  HiringRadar -- Scoring Benchmark")
-    print(f"  Weights: title={_W_TITLE}, jd={_W_JD}, kword={_W_KWORD}")
+    print(f"  Weights: title={_W_TITLE}, jd={_W_JD}, skills={_W_SKILLS}")
     print(f"  JD truncation: {_JD_CHARS} chars  |  ROLE_BONUS={ROLE_BONUS}  INTERN_BONUS={INTERN_BONUS}")
     print("=" * 70)
 
