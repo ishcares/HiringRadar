@@ -125,7 +125,7 @@ def extract_skills_from_jd(title: str, company: str, description: str) -> dict:
     for attempt in range(max_retries):
         try:
             response = client.models.generate_content(
-                model="gemini-2.5-flash-lite",
+                model="gemini-3.5-flash",
                 contents=prompt,
             )
             text = (response.text or "").strip()

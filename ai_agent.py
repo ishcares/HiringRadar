@@ -22,8 +22,8 @@ def _get_client():
             print(f"Gemini client init failed: {e}")
     return _gemini_client
 
-FAST_MODEL = "gemini-2.5-flash-lite"
-SMART_MODEL = "gemini-2.5-flash"
+FAST_MODEL = "gemini-3.5-flash"
+SMART_MODEL = "gemini-3.5-flash"
 
 def execute_gemini_with_retry(prompt: str, model_name: str = FAST_MODEL, max_retries: int = 3) -> str:
     """Executes a Gemini generation call with exponential back-off retries to handle 429/503 errors."""
@@ -404,27 +404,58 @@ Write exactly 2 sentences of recruiter-grade advice:
     except Exception as e:
         print(f"Error generating advice: {e}")
 
-    # 5. Format multi-signal recruiter card
-    matched_str = ", ".join(matched_req)  if matched_req  else "None detected"
-    missing_str = ", ".join(missing_req)  if missing_req  else "None — strong match! ✅"
-    proj_str    = ", ".join(proj_overlap) if proj_overlap else "Not shown in projects yet"
-    pref_str    = ", ".join(gaps["matched_preferred"]) if gaps["matched_preferred"] else "None"
-    exp_str     = f"{exp_gap} yr gap" if exp_gap else "No gap ✅"
+    # 5. Format strengths and needs improvement
+    strengths_list = []
+    
+    def clean_skill(s):
+        s_clean = s.strip()
+        if len(s_clean) <= 3:
+            return s_clean.upper()
+        if s_clean.lower() == "nodejs": return "Node.js"
+        if s_clean.lower() == "reactjs": return "React"
+        return s_clean.capitalize()
+
+    for s in matched_req:
+        strengths_list.append(f"✓ {clean_skill(s)}")
+    for s in gaps.get("matched_preferred", []):
+        strengths_list.append(f"✓ {clean_skill(s)} (Preferred)")
+
+    # Add matched roles to strengths if any
+    try:
+        student_roles = resume_data.get("preferred_roles") or []
+        job_title_lower = (jd_data.get("job_title") or "").lower()
+        from matching import keyword_map
+        for r in student_roles:
+            keywords = keyword_map.get(r, [])
+            if any(kw in job_title_lower for kw in keywords):
+                strengths_list.append(f"✓ {r.capitalize()} role match")
+                break
+    except Exception:
+        pass
+
+    strengths_str = "\n".join(strengths_list) if strengths_list else "None detected"
+
+    needs_improvement_list = []
+    for s in missing_req:
+        needs_improvement_list.append(f"⚠ {clean_skill(s)}")
+    if exp_gap:
+        needs_improvement_list.append(f"⚠ {exp_gap} yr experience gap")
+    
+    needs_improvement_str = "\n".join(needs_improvement_list) if needs_improvement_list else "None — strong match! ✅"
+
+    score = gaps.get("composite_pct", 0)
+    if score >= 75:
+        recommendation = "Apply 🚀"
+    elif score >= 50:
+        recommendation = "Apply with Caution ⚠️"
+    else:
+        recommendation = "Skip / Low Match ❌"
 
     report = (
-        f"*🎯 Overall Match: {gaps['composite_pct']}%*\n"
-        f"━" * 21 + "\n"
-        f"\n📊 *Why {gaps['composite_pct']}%? Signal breakdown:*\n"
-        f"  • Skills match:       {gaps['required_match_pct']}%\n"
-        f"  • Project relevance: {gaps['project_score_pct']}%\n"
-        f"  • Experience fit:    {gaps['exp_score_pct']}%\n"
-        f"  • Education fit:     {gaps['edu_score_pct']}%\n"
-        f"\n✅ *Matched required skills:* {matched_str}\n"
-        f"❌ *Critical gaps:* {missing_str}\n"
-        f"🛠️ *Shown in your projects:* {proj_str}\n"
-        f"⭐ *Preferred skills you have:* {pref_str}\n"
-        f"📅 *Experience:* {exp_str}\n"
-        f"\n🧠 *Recruiter take:*\n{advice}"
+        f"💪 *Strengths*\n{strengths_str}\n\n"
+        f"⚠️ *Needs Improvement*\n{needs_improvement_str}\n\n"
+        f"🎯 *Recommendation*\n{recommendation}\n\n"
+        f"🧠 *Recruiter take:*\n{advice}"
     )
     return report
 

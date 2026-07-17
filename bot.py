@@ -1077,6 +1077,107 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ Broadcast finished.\nSent: {success_count}\nFailed: {fail_count}")
 
 
+def fetch_job_description(url: str) -> str:
+    """Fetches full job description from various ATS endpoints on-demand."""
+    import re
+    import requests
+    from bs4 import BeautifulSoup
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    }
+    
+    # 1. Workday CXS API
+    if ".myworkdayjobs.com/" in url:
+        try:
+            match = re.search(r"https://([^.]+)\.wd(\d+)\.myworkdayjobs\.com/([^/]+)/([^/]+)(/job/.*)", url)
+            if match:
+                tenant, wd_num, lang, job_board, job_path = match.groups()
+                api_url = f"https://{tenant}.wd{wd_num}.myworkdayjobs.com/wday/cxs/{tenant}/{job_board}{job_path}"
+                resp = requests.get(api_url, headers={"Accept": "application/json", "User-Agent": headers["User-Agent"]}, timeout=10)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    html_desc = data.get("jobPostingInfo", {}).get("jobDescription", "")
+                    if html_desc:
+                        soup = BeautifulSoup(html_desc, "html.parser")
+                        return soup.get_text(separator="\n").strip()
+        except Exception as e:
+            print(f"Failed to fetch Workday description on-demand: {e}")
+            
+    # 2. SmartRecruiters API
+    if "jobs.smartrecruiters.com/" in url:
+        try:
+            match = re.search(r"jobs\.smartrecruiters\.com/([^/]+)/([^/?]+)", url)
+            if match:
+                company_id, job_id = match.groups()
+                api_url = f"https://api.smartrecruiters.com/v1/companies/{company_id}/postings/{job_id}"
+                resp = requests.get(api_url, headers={"Accept": "application/json", "User-Agent": headers["User-Agent"]}, timeout=10)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    sections = data.get("sections", {})
+                    desc_parts = []
+                    for key in ["jobDescription", "qualifications", "additionalInformation"]:
+                        txt = sections.get(key, {}).get("text", "")
+                        if txt:
+                            soup = BeautifulSoup(txt, "html.parser")
+                            desc_parts.append(soup.get_text(separator="\n").strip())
+                    if desc_parts:
+                        return "\n\n".join(desc_parts)
+        except Exception as e:
+            print(f"Failed to fetch SmartRecruiters description on-demand: {e}")
+            
+    # 3. Generic HTML Fallback
+    try:
+        resp = requests.get(url, headers=headers, timeout=10)
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.text, "html.parser")
+            for element in soup(["script", "style", "nav", "footer", "header"]):
+                element.decompose()
+            for selector in ["[class*=description]", "[class*=job-details]", "[class*=jobDescription]", "article", "main", ".job-info"]:
+                elem = soup.select_one(selector)
+                if elem:
+                    txt = elem.get_text(separator="\n").strip()
+                    if len(txt) > 200:
+                        return txt
+            if soup.body:
+                return soup.body.get_text(separator="\n").strip()
+            return soup.get_text(separator="\n").strip()
+    except Exception as e:
+        print(f"Failed to fetch generic job description on-demand: {e}")
+        
+    return ""
+
+
+async def get_or_fetch_job_description(job: dict) -> str:
+    """Gets job description from row, or fetches and caches it if empty."""
+    desc = (job.get("description") or "").strip()
+    if desc:
+        return desc
+        
+    url = job.get("url")
+    if not url:
+        return "Software engineering duties."
+        
+    print(f"[INFO] Fetching job description dynamically for: {url}")
+    fetched = await asyncio.to_thread(fetch_job_description, url)
+    if fetched:
+        try:
+            # Update cache and reset skills so they re-extract with the new description
+            supabase.table("jobs_cache").update({
+                "description": fetched,
+                "required_skills": None,
+                "preferred_skills": None,
+                "min_years_experience": None
+            }).eq("id", job["id"]).execute()
+            print(f"[OK] Cached fetched description for job ID: {job['id']}")
+        except Exception as e:
+            print(f"Failed to cache fetched description: {e}")
+        return fetched
+        
+    return "Software engineering duties."
+
+
 async def _run_resume_analysis(context, chat_id: int, url_hash: str, resume_text: str, reply_msg):
     """
     Runs resume evaluation against a job using stored resume_text.
@@ -1086,13 +1187,13 @@ async def _run_resume_analysis(context, chat_id: int, url_hash: str, resume_text
     job_company = "Tech Firm"
     job_description = "Software engineering duties."
     try:
-        res = supabase.table("jobs_cache").select("url, title, company, description").eq("is_active", True).execute()
+        res = supabase.table("jobs_cache").select("id, url, title, company, description").eq("is_active", True).execute()
         for j in (res.data or []):
             h = hashlib.md5(j["url"].encode()).hexdigest()[:10]
             if h == url_hash:
                 job_title = j["title"]
                 job_company = j["company"]
-                job_description = j.get("description") or job_description
+                job_description = await get_or_fetch_job_description(j)
                 break
     except Exception as e:
         print(f"_run_resume_analysis: job lookup failed: {e}")
@@ -1331,14 +1432,14 @@ async def handle_wizard_resume_pdf(update: Update, context: ContextTypes.DEFAULT
     job_company = "Tech Firm"
     job_description = "Software engineering duties."
     try:
-        res = supabase.table("jobs_cache").select("url, title, company, description").eq("is_active", True).execute()
+        res = supabase.table("jobs_cache").select("id, url, title, company, description").eq("is_active", True).execute()
         for j in res.data:
             h = hashlib.md5(j["url"].encode()).hexdigest()[:10]
             if h == url_hash:
                 job_info = f"*{j['company']}* — {j['title']}\n🔗 URL: {j['url']}"
                 job_title = j["title"]
                 job_company = j["company"]
-                job_description = j.get("description") or "Software engineering duties."
+                job_description = await get_or_fetch_job_description(j)
                 break
     except Exception as e:
         print(f"Failed to fetch job info for forward: {e}")
