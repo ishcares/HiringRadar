@@ -22,7 +22,10 @@ def _get_client():
             print(f"Gemini client init failed: {e}")
     return _gemini_client
 
-def execute_gemini_with_retry(prompt: str, model_name: str = 'gemini-3.1-flash-lite', max_retries: int = 3) -> str:
+FAST_MODEL = "gemini-2.5-flash-lite"
+SMART_MODEL = "gemini-2.5-flash"
+
+def execute_gemini_with_retry(prompt: str, model_name: str = FAST_MODEL, max_retries: int = 3) -> str:
     """Executes a Gemini generation call with exponential back-off retries to handle 429/503 errors."""
     client = _get_client()
     if not client:
@@ -250,7 +253,7 @@ JSON output format:
         }
 
 def compute_gap_analysis(resume_data: dict, jd_data: dict) -> dict:
-    """Deterministic skill and experience overlap matcher."""
+    """Deterministic multi-signal skill and experience overlap matcher."""
     resume_skills = {s.lower().strip() for s in resume_data.get("skills", [])}
     required = {s.lower().strip() for s in jd_data.get("required_skills", [])}
     preferred = {s.lower().strip() for s in jd_data.get("preferred_skills", [])}
@@ -265,6 +268,11 @@ def compute_gap_analysis(resume_data: dict, jd_data: dict) -> dict:
         "mongo": {"mongodb"},
         "docker": {"dockerfile"},
         "k8s": {"kubernetes"},
+        "python": {"py"},
+        "javascript": {"js"},
+        "typescript": {"ts"},
+        "golang": {"go"},
+        "cpp": {"c++"},
     }
 
     def _canonical(term):
@@ -285,76 +293,138 @@ def compute_gap_analysis(resume_data: dict, jd_data: dict) -> dict:
     matched_preferred = fuzzy_match(preferred, resume_skills)
     missing_required = required - matched_required
 
+    # Signal 1: Required skills match (0–1.0)
     required_pct = len(matched_required) / len(required) if required else 1.0
 
+    # Signal 2: Experience gap
     exp_gap = None
-    min_exp = jd_data.get("min_experience_years", 0)
-    res_exp = resume_data.get("experience_years", 0)
+    min_exp = jd_data.get("min_experience_years") or 0
+    res_exp = resume_data.get("experience_years") or 0
     if min_exp > res_exp:
         exp_gap = min_exp - res_exp
+    # Experience compatibility score (1.0 = perfect fit, 0.0 = way off)
+    if min_exp == 0:
+        exp_score = 1.0
+    elif res_exp >= min_exp:
+        exp_score = 1.0
+    elif exp_gap and exp_gap <= 1:
+        exp_score = 0.75
+    elif exp_gap and exp_gap <= 3:
+        exp_score = 0.40
+    else:
+        exp_score = 0.10
+
+    # Signal 3: Project domain relevance
+    # Check if student projects use skills that overlap with job requirements
+    projects = resume_data.get("projects", [])
+    project_skills = set()
+    for p in projects:
+        project_skills.update(s.lower().strip() for s in p.get("tech_stack", []))
+    project_overlap = fuzzy_match(required, project_skills)
+    project_score = len(project_overlap) / len(required) if required else 0.5
+
+    # Signal 4: Education fit
+    edu = (resume_data.get("education_level") or "").lower()
+    job_title_lower = (jd_data.get("job_title") or "").lower()
+    if "phd" in edu or "postgrad" in edu:
+        edu_score = 1.0
+    elif "undergrad" in edu or "bachelor" in edu:
+        # Undergrad is fine for most engineering roles
+        if any(kw in job_title_lower for kw in ["research", "scientist", "principal", "staff"]):
+            edu_score = 0.5  # these prefer postgrad
+        else:
+            edu_score = 0.9
+    else:
+        edu_score = 0.7  # unknown, don't penalise
+
+    # Weighted composite score
+    # Skills overlap is the strongest signal (50%), project relevance (25%),
+    # experience (15%), education (10%)
+    composite = (
+        0.50 * required_pct +
+        0.25 * project_score +
+        0.15 * exp_score +
+        0.10 * edu_score
+    )
 
     return {
         "required_match_pct": round(required_pct * 100),
+        "composite_pct": round(composite * 100),
         "matched_required": sorted(matched_required),
         "missing_required": sorted(missing_required),
         "matched_preferred": sorted(matched_preferred),
+        "project_overlap": sorted(project_overlap),
+        "project_score_pct": round(project_score * 100),
         "experience_gap_years": exp_gap,
+        "exp_score_pct": round(exp_score * 100),
+        "edu_score_pct": round(edu_score * 100),
+        "education_level": resume_data.get("education_level") or "Unknown",
     }
 
 
 def evaluate_resume_for_job(resume_text: str, job_title: str, company: str, job_description: str) -> str:
-    """Evaluates candidate resume using deterministic skill comparison and low-cost LLM advice generation."""
+    """Evaluates candidate resume using 4-signal gap analysis + LLM recruiter advice."""
     # 1. Structured parse of the candidate resume
     resume_data = parse_skills_from_resume(resume_text)
-    
-    # 2. Structured parse of the JD description (mocking structure if not in DB yet)
-    # Extract JD required and preferred skills using our existing jd_skill_extractor prompt format
+
+    # 2. Structured parse of the JD
     from jd_skill_extractor import extract_skills_from_jd
     jd_data = extract_skills_from_jd(job_title, company, job_description)
     if not jd_data:
         jd_data = {"required_skills": [], "preferred_skills": []}
+    jd_data["job_title"] = job_title  # passed into edu fit check
 
-    # 3. Deterministic Overlap calculation
+    # 3. Multi-signal gap analysis
     gaps = compute_gap_analysis(resume_data, jd_data)
-    
-    # 4. LLM-generated concrete advice
-    missing_req = gaps["missing_required"]
-    matched_req = gaps["matched_required"]
-    exp_gap = gaps["experience_gap_years"] or 0
-    
-    advice_prompt = f"""A student is deciding whether and how to apply for a specific job. You have their
-verified skill gap versus this job's requirements. Write exactly 2-3 sentences of advice.
 
-Matched required skills: {matched_req}
-Missing required skills: {missing_req}
-Matched preferred skills: {gaps["matched_preferred"]}
-Experience gap: {gaps["experience_gap_years"]} years (null if none)
+    missing_req  = gaps["missing_required"]
+    matched_req  = gaps["matched_required"]
+    proj_overlap = gaps["project_overlap"]
+    exp_gap      = gaps["experience_gap_years"]
 
-Rules:
-- Reference the actual skill names given above. Never invent a skill not in these lists.
-- Do not give generic encouragement ("you can do it!", "consider upskilling"). Be specific:
-  name which single missing skill to prioritize first, and briefly say why — e.g. because it's
-  foundational to the others they already have, or because it's the most commonly-required
-  gap for this role type.
-- If missing_required is empty, say so plainly and note they're a strong match on paper.
-- Do not comment on experience_gap_years unless it is not null.
-- Keep tone direct and practical, not motivational-poster language.
-"""
-    
-    advice = "Continue focusing on building projects using your core stack."
+    # 4. LLM recruiter advice — specific, named skills only
+    advice_prompt = f"""A student is deciding whether and how to apply for {job_title} at {company}.
+
+Verified gap data (do not invent any skill not listed here):
+- Required skills matched: {matched_req}
+- Required skills missing: {missing_req}
+- Skills shown in their projects: {proj_overlap}
+- Preferred skills matched: {gaps['matched_preferred']}
+- Experience gap: {exp_gap} years (null = no gap)
+- Education: {gaps['education_level']}
+
+Write exactly 2 sentences of recruiter-grade advice:
+- Name specific missing skills. If missing_required is empty, confirm strong match and suggest one preferred skill to add to a project.
+- If there is an experience gap, mention one concrete workaround (e.g. open-source contribution, personal project using that stack).
+- No generic phrases ("upskill yourself", "you can do it"). Be direct and actionable."""
+
+    advice = "Focus on adding a project that demonstrates the missing required skills."
     try:
         advice = execute_gemini_with_retry(advice_prompt)
     except Exception as e:
         print(f"Error generating advice: {e}")
 
-    # Format the unified, explainable card
-    matched_str = ", ".join(matched_req) if matched_req else "None detected"
-    missing_str = ", ".join(missing_req) if missing_req else "None detected"
-    
+    # 5. Format multi-signal recruiter card
+    matched_str = ", ".join(matched_req)  if matched_req  else "None detected"
+    missing_str = ", ".join(missing_req)  if missing_req  else "None — strong match! ✅"
+    proj_str    = ", ".join(proj_overlap) if proj_overlap else "Not shown in projects yet"
+    pref_str    = ", ".join(gaps["matched_preferred"]) if gaps["matched_preferred"] else "None"
+    exp_str     = f"{exp_gap} yr gap" if exp_gap else "No gap ✅"
+
     report = (
-        f"- Match Score: {gaps['required_match_pct']}%\n"
-        f"- Matched Skills: {matched_str}\n"
-        f"- Critical Stack Gaps: {missing_str}\n"
-        f"- Recruiter Advice:\n{advice}"
+        f"*🎯 Overall Match: {gaps['composite_pct']}%*\n"
+        f"━" * 21 + "\n"
+        f"\n📊 *Why {gaps['composite_pct']}%? Signal breakdown:*\n"
+        f"  • Skills match:       {gaps['required_match_pct']}%\n"
+        f"  • Project relevance: {gaps['project_score_pct']}%\n"
+        f"  • Experience fit:    {gaps['exp_score_pct']}%\n"
+        f"  • Education fit:     {gaps['edu_score_pct']}%\n"
+        f"\n✅ *Matched required skills:* {matched_str}\n"
+        f"❌ *Critical gaps:* {missing_str}\n"
+        f"🛠️ *Shown in your projects:* {proj_str}\n"
+        f"⭐ *Preferred skills you have:* {pref_str}\n"
+        f"📅 *Experience:* {exp_str}\n"
+        f"\n🧠 *Recruiter take:*\n{advice}"
     )
     return report
+

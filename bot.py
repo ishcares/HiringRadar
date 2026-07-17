@@ -45,7 +45,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # Conversation states
-NAME, COLLEGE, DEPARTMENT, BRANCH, GRAD_YEAR, SKILLS, ROLES, JOB_TYPE, EDIT_COLLEGE, EDIT_DEPARTMENT = range(10)
+NAME, COLLEGE, DEPARTMENT, BRANCH, GRAD_YEAR, EXP_LEVEL, RESUME_UPLOAD, SKILLS, ROLES, JOB_TYPE, EDIT_COLLEGE, EDIT_DEPARTMENT = range(12)
 def get_time_ago_string(scraped_at_str: str) -> str:
     """Returns a 'time ago' string for the scraped timestamp."""
     from datetime import datetime, timezone
@@ -277,12 +277,148 @@ async def get_grad_year(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return GRAD_YEAR
     context.user_data['graduation_year'] = year
-    
+
+    # Ask experience level via inline buttons
+    keyboard = [
+        [
+            InlineKeyboardButton("🌱 Fresher / Student (0 yrs)", callback_data="exp:fresher"),
+        ],
+        [
+            InlineKeyboardButton("🔵 Up to 1 year", callback_data="exp:junior1"),
+            InlineKeyboardButton("💼 1–3 years", callback_data="exp:mid"),
+        ],
+        [
+            InlineKeyboardButton("🚀 3+ years", callback_data="exp:senior"),
+        ],
+    ]
     await update.message.reply_text(
-        "💻 What are your top skills?\n\nSend comma separated: *Python, React, SQL, ML*",
+        "🎯 *What is your current experience level?*\n\n"
+        "This helps us filter out jobs that require more experience than you have.",
+        reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown"
     )
-    return SKILLS
+    return EXP_LEVEL
+
+
+async def get_exp_level(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if query:
+        await query.answer()
+        exp_val = query.data.replace("exp:", "")
+    else:
+        exp_val = "fresher"  # safe default
+
+    # Map to years of experience for filtering
+    exp_years_map = {
+        "fresher": 0,
+        "junior1": 1,
+        "mid": 2,
+        "senior": 4,
+    }
+    exp_label_map = {
+        "fresher": "Fresher / Student",
+        "junior1": "Up to 1 year",
+        "mid": "1–3 years",
+        "senior": "3+ years",
+    }
+    context.user_data['experience_level'] = exp_val
+    context.user_data['years_of_experience'] = exp_years_map.get(exp_val, 0)
+
+    label = exp_label_map.get(exp_val, exp_val)
+    upload_keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📄 Upload Resume (auto-extract skills)", callback_data="onboard_resume:upload")],
+        [InlineKeyboardButton("✏️ Type my skills manually", callback_data="onboard_resume:skip")],
+    ])
+    await query.message.reply_text(
+        f"✅ *{label}* selected.\n\n"
+        "📄 *Upload your resume (PDF)* to auto-extract your skills — or type them manually.",
+        reply_markup=upload_keyboard,
+        parse_mode="Markdown"
+    )
+    return RESUME_UPLOAD
+
+
+async def handle_onboarding_resume_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles Upload / Skip choice after experience level selection."""
+    query = update.callback_query
+    await query.answer()
+    choice = query.data.replace("onboard_resume:", "")
+
+    if choice == "upload":
+        await query.message.reply_text(
+            "📤 *Send your resume as a PDF file now.*\n\n"
+            "_Your skills will be automatically extracted from it._",
+            parse_mode="Markdown"
+        )
+        return RESUME_UPLOAD  # wait for document
+    else:
+        # User chose to type manually
+        await query.message.reply_text(
+            "💻 What are your top skills?\n\nSend comma separated: *Python, React, SQL, ML*",
+            parse_mode="Markdown"
+        )
+        return SKILLS
+
+
+async def handle_onboarding_resume_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Parses uploaded PDF during onboarding and extracts skills into user_data."""
+    document = update.message.document
+    if not document or not document.file_name.lower().endswith(".pdf"):
+        await update.message.reply_text("⚠️ Please send a PDF file, or type /cancel and enter skills manually.")
+        return RESUME_UPLOAD
+
+    await update.message.reply_text("⏳ Reading your resume...")
+
+    import tempfile
+    local_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp_resumes")
+    os.makedirs(local_dir, exist_ok=True)
+    chat_id = update.effective_chat.id
+    local_path = os.path.join(local_dir, f"{chat_id}_onboard_resume.pdf")
+
+    try:
+        new_file = await context.bot.get_file(document.file_id)
+        await new_file.download_to_drive(local_path)
+        resume_text = await asyncio.to_thread(extract_resume_text_from_path, local_path)
+        if os.path.exists(local_path):
+            os.remove(local_path)
+
+        if not resume_text:
+            await update.message.reply_text(
+                "⚠️ Couldn't extract text from this PDF. It may be scanned.\n\n"
+                "💻 Please type your skills manually (comma separated):"
+            )
+            return SKILLS
+
+        # Use ai_agent to parse skills from resume text
+        from ai_agent import parse_skills_from_resume
+        resume_data = await asyncio.to_thread(parse_skills_from_resume, resume_text)
+        skills = resume_data.get("skills", [])
+        if not skills:
+            await update.message.reply_text(
+                "⚠️ Couldn't detect skills from your resume.\n\n"
+                "💻 Please type your skills manually (comma separated):"
+            )
+            return SKILLS
+
+        context.user_data['skills'] = skills
+        context.user_data['resume_text'] = resume_text
+
+        await update.message.reply_text(
+            f"✅ *Skills extracted from resume:*\n{', '.join(skills[:20])}\n\n"
+            "🎯 What roles are you interested in?\n\n"
+            "Choose from: backend / frontend / ml / data / devops / fullstack / android / ios\n\n"
+            "Send comma separated: *backend, ml*",
+            parse_mode="Markdown"
+        )
+        return ROLES
+
+    except Exception as e:
+        print(f"Onboarding resume parse failed: {e}")
+        await update.message.reply_text(
+            "⚠️ Something went wrong reading your PDF.\n\n"
+            "💻 Please type your skills manually (comma separated):"
+        )
+        return SKILLS
 
 async def get_skills(update: Update, context: ContextTypes.DEFAULT_TYPE):
     skills = [s.strip() for s in update.message.text.split(",")]
@@ -336,10 +472,13 @@ async def get_job_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "department": data.get('department', 'cse'),
             "branch": data['branch'],
             "graduation_year": data['graduation_year'],
+            "experience_level": data.get('experience_level', 'fresher'),
+            "years_of_experience": data.get('years_of_experience', 0),
             "skills": data['skills'],
             "preferred_roles": data['preferred_roles'],
             "job_type": data['job_type'],
             "referral_code": referral_code,
+            "resume_text": data.get('resume_text'),  # None if they typed skills manually
         }).execute()
 
         # If referred by someone, record it and potentially reward the referrer
@@ -861,6 +1000,17 @@ async def update_experience(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ Looking for: {job_type}")
 
 
+async def update_resume(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Lets users update their stored resume PDF without re-doing onboarding."""
+    context.user_data["updresume_mode"] = True
+    await update.message.reply_text(
+        "📄 *Update your resume*\n\n"
+        "Send your resume as a PDF and we'll update it on file.\n"
+        "All future match analyses will use the new version automatically.",
+        parse_mode="Markdown"
+    )
+
+
 async def update_locations(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     if not context.args:
@@ -927,6 +1077,53 @@ async def broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"✅ Broadcast finished.\nSent: {success_count}\nFailed: {fail_count}")
 
 
+async def _run_resume_analysis(context, chat_id: int, url_hash: str, resume_text: str, reply_msg):
+    """
+    Runs resume evaluation against a job using stored resume_text.
+    Called directly when user already has a resume on file — skips upload prompt.
+    """
+    job_title = "Software Engineer"
+    job_company = "Tech Firm"
+    job_description = "Software engineering duties."
+    try:
+        res = supabase.table("jobs_cache").select("url, title, company, description").eq("is_active", True).execute()
+        for j in (res.data or []):
+            h = hashlib.md5(j["url"].encode()).hexdigest()[:10]
+            if h == url_hash:
+                job_title = j["title"]
+                job_company = j["company"]
+                job_description = j.get("description") or job_description
+                break
+    except Exception as e:
+        print(f"_run_resume_analysis: job lookup failed: {e}")
+
+    try:
+        evaluation_text = await asyncio.to_thread(
+            evaluate_resume_for_job, resume_text, job_title, job_company, job_description
+        )
+        admin_chat_id = os.getenv("ADMIN_CHAT_ID")
+        if admin_chat_id:
+            buttons = [[
+                InlineKeyboardButton("✅ Approve & Send", callback_data=f"admin:approve:{chat_id}:{url_hash}"),
+                InlineKeyboardButton("❌ Reject / Clear", callback_data=f"admin:reject:{chat_id}:{url_hash}")
+            ]]
+            await context.bot.send_message(
+                chat_id=int(admin_chat_id),
+                text=(
+                    f"📝 *Evaluation (stored resume)*\n\n"
+                    f"👤 Candidate ID: `{chat_id}`\n"
+                    f"🏢 *Target:* {job_company} — {job_title}\n\n"
+                    f"--- REPORT ---\n{evaluation_text}\n--------------\n\n"
+                    f"Approve or reject:"
+                ),
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(buttons)
+            )
+    except Exception as e:
+        print(f"_run_resume_analysis failed: {e}")
+        await reply_msg.reply_text("⚠️ Error running analysis. Please try again.")
+
+
 async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()   # stops the loading spinner on the button
@@ -934,14 +1131,31 @@ async def feedback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = query.from_user.id
     
     if feedback == "check_match":
+        # Check if the student already has a resume stored in their profile
+        stored_res = supabase.table("students").select("resume_text").eq("chat_id", chat_id).execute()
+        stored_resume = (stored_res.data or [{}])[0].get("resume_text") if stored_res.data else None
+
+        if stored_resume:
+            # Resume already on file — trigger analysis directly, no upload needed
+            context.user_data["waiting_for_resume_hash"] = url_hash
+            await query.message.reply_text(
+                "⏳ *Running match analysis using your stored resume...*\n"
+                "_(You can update your resume anytime with /updresume)_",
+                parse_mode="Markdown"
+            )
+            # Kick off the Wizard-of-Oz analysis in background using stored resume
+            asyncio.create_task(_run_resume_analysis(context, chat_id, url_hash, stored_resume, query.message))
+            return
+
+        # No resume on file — ask them to upload
         context.user_data["waiting_for_resume_hash"] = url_hash
         privacy_text = (
             "🔒 *HiringRadar Secure Match:*\n\n"
-            "Please upload your resume in PDF format here. (You can redact your email and phone number if you wish).\n\n"
-            "Our matching engine will run a semantic vector-embedding alignment against the live ATS requirements. "
-            "_(Processing takes 5-10 minutes. We will ping you with your score here!)_"
+            "Please upload your resume in PDF format. "
+            "_(We’ll save it so you never have to upload again!)_\n\n"
+            "You can redact your email and phone number if you wish.\n\n"
+            "_(Processing takes 5–10 minutes. We’ll ping you with your score here!)_"
         )
-        # Keep buttons intact so user can still click relevant/skip later if they want
         await query.message.reply_text(privacy_text, parse_mode="Markdown")
         return
 
@@ -1074,7 +1288,29 @@ async def handle_wizard_resume_pdf(update: Update, context: ContextTypes.DEFAULT
     if not document.file_name.lower().endswith(".pdf"):
         await update.message.reply_text("❌ Please upload your resume in PDF format.")
         return
-        
+
+    # /updresume mode: just save the resume, no match analysis
+    if context.user_data.get("updresume_mode"):
+        context.user_data.pop("updresume_mode", None)
+        local_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp_resumes")
+        os.makedirs(local_dir, exist_ok=True)
+        local_path = os.path.join(local_dir, f"{chat_id}_update_resume.pdf")
+        try:
+            new_file = await context.bot.get_file(document.file_id)
+            await new_file.download_to_drive(local_path)
+            resume_text = await asyncio.to_thread(extract_resume_text_from_path, local_path)
+            if os.path.exists(local_path):
+                os.remove(local_path)
+            if resume_text:
+                supabase.table("students").update({"resume_text": resume_text}).eq("chat_id", chat_id).execute()
+                await update.message.reply_text("✅ *Resume updated!* Your next match analysis will use this version.", parse_mode="Markdown")
+            else:
+                await update.message.reply_text("⚠️ Couldn't read that PDF. Please try a text-based PDF.")
+        except Exception as e:
+            print(f"updresume failed: {e}")
+            await update.message.reply_text("⚠️ Something went wrong. Please try again.")
+        return
+
     url_hash = context.user_data.get("waiting_for_resume_hash")
     if not url_hash:
         await update.message.reply_text("⚠️ Please click 'Check Resume Match' under a job card first to initiate matching.")
@@ -1154,7 +1390,13 @@ async def handle_wizard_resume_pdf(update: Update, context: ContextTypes.DEFAULT
         if not resume_text:
             await update.message.reply_text("⚠️ We couldn't extract text from this PDF. Please ensure it is not a scanned image.")
             return
-            
+
+        # Save resume to student profile so they never upload again
+        try:
+            supabase.table("students").update({"resume_text": resume_text}).eq("chat_id", chat_id).execute()
+        except Exception as save_err:
+            print(f"Failed to save resume to students table: {save_err}")
+
         # 4. Generate Strict Evaluation using Gemini
         evaluation_text = await asyncio.to_thread(
             evaluate_resume_for_job, resume_text, job_title, job_company, job_description
@@ -1214,6 +1456,7 @@ async def on_startup(app):
         BotCommand("roles",      "Update preferred roles"),
         BotCommand("locations",  "Update preferred locations"),
         BotCommand("experience", "Update job type preference"),
+        BotCommand("updresume",  "Update your stored resume"),
         BotCommand("pause",      "Pause job alerts"),
         BotCommand("resume",     "Resume job alerts"),
         BotCommand("start",      "Set up or restart your profile"),
@@ -1236,6 +1479,11 @@ def create_app(token):
             ],
             BRANCH:     [MessageHandler(filters.TEXT & ~filters.COMMAND, get_branch)],
             GRAD_YEAR:  [MessageHandler(filters.TEXT & ~filters.COMMAND, get_grad_year)],
+            EXP_LEVEL:  [CallbackQueryHandler(get_exp_level, pattern="^exp:")],
+            RESUME_UPLOAD: [
+                CallbackQueryHandler(handle_onboarding_resume_choice, pattern="^onboard_resume:"),
+                MessageHandler(filters.Document.PDF, handle_onboarding_resume_pdf),
+            ],
             SKILLS:     [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_skills)
             ],
@@ -1267,6 +1515,7 @@ def create_app(token):
     app.add_handler(CommandHandler("roles", update_roles))
     app.add_handler(CommandHandler("locations", update_locations))
     app.add_handler(CommandHandler("experience", update_experience))
+    app.add_handler(CommandHandler("updresume",  update_resume))
     app.add_handler(CommandHandler("pause", pause_alerts))
     app.add_handler(CommandHandler("resume", resume_alerts))
     app.add_handler(CallbackQueryHandler(feedback_handler, pattern="^feedback:"))

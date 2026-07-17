@@ -86,7 +86,12 @@ def get_experience_tag(title: str, description: str = "") -> str:
     # NOTE: description can be None when loaded from Supabase (NULL != empty string).
     desc_lower = (description or "").lower()
     if desc_lower:
-        exp_match = re.search(r"(\b\d+)(?:-\d+)?\+?\s*(?:years?|yrs?)\b\s*(?:of\s*)?\s*(?:experience|software|work|product)", desc_lower)
+        # Allow for adverbs/adjectives between "of" and "experience"
+        # e.g. "8+ years of meaningful experience", "5+ years of hands-on work"
+        exp_match = re.search(
+            r"(\b\d+)(?:-\d+)?\+?\s*(?:years?|yrs?)\b\s*(?:of\s+)?(?:\w+\s+)*(?:experience|software|work|product)",
+            desc_lower
+        )
         if exp_match:
             try:
                 years = int(exp_match.group(1))
@@ -257,10 +262,29 @@ def _build_profile_text(student: dict) -> str:
     )
 
 
-def _filter_fresher_jobs(jobs: list, grad_year: int, current_year: int) -> list:
-    """Keep fresher-friendly roles for recent grads; drop clearly senior titles."""
-    if grad_year < current_year - 1:
+def _filter_fresher_jobs(jobs: list, grad_year: int, current_year: int, student_years: int | None = None) -> list:
+    """Keep roles appropriate for the student's actual experience level.
+
+    student_years — the explicit years_of_experience from their profile (0=fresher, 1, 2, 4).
+    If not provided, falls back to inferring from graduation year.
+    """
+    # Determine the student's effective years of experience
+    if student_years is not None:
+        effective_exp = student_years
+    else:
+        # Fallback: infer from graduation year
+        effective_exp = max(0, current_year - grad_year)
+
+    # Students who have been working 3+ years are not filtered as freshers
+    if effective_exp >= 3:
         return jobs
+
+    # Hard filter: reject jobs requiring more experience than the student has (+ 1yr buffer)
+    _MAX_EXP = effective_exp + 1  # e.g. fresher (0) → max job req 1yr, junior1 (1) → max 2yr
+    jobs = [
+        j for j in jobs
+        if (j.get("min_years_experience") or 0) <= _MAX_EXP
+    ]
 
     fresher_keywords = [
         "intern", "internship", "fresher", "junior", "graduate", "new grad",
@@ -650,7 +674,8 @@ def match_jobs_for_student(
 
     current_year = datetime.now().year
     grad_year = student.get("graduation_year", current_year)
-    jobs = _filter_fresher_jobs(jobs, grad_year, current_year)
+    student_years = student.get("years_of_experience")  # None if not set (older profiles)
+    jobs = _filter_fresher_jobs(jobs, grad_year, current_year, student_years=student_years)
     if not jobs:
         return []
 
