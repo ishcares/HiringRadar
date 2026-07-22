@@ -104,7 +104,7 @@ def extract_skills_from_jd(title: str, company: str, description: str) -> dict:
                     req = row.get("required_skills")
                     pref = row.get("preferred_skills")
                     min_exp = row.get("min_years_experience")
-                    if req is not None:
+                    if req:
                         logger.info("Found cached skills in Supabase for '%s' @ %s", title, company)
                         return {
                             "required_skills": req,
