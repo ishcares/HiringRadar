@@ -116,6 +116,9 @@ def is_relevant(title):
         "content", "copywriter", "brand", "growth manager",
         "associate, ", "associate -", "collection", "collections",
         "lending", "credit officer", "operations", "commercial",
+        "logistics", "supply chain", "procurement", "dceo", "facilities",
+        "hardware", "mechanical", "electrical", "civil", "construction",
+        "technician", "support specialist", "specialist,", "specialist -", "specialist ",
         # Senior/Experience blocks — "staff" catches Staff Engineer, Staff PM etc.
         "senior", "sr.", "sr ", "staff ", "staff,", "lead", "manager", "principal",
         "architect", "director", "vp", "chief", "head of", "head,",
