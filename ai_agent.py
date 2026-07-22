@@ -125,29 +125,44 @@ literally in the text below. Never infer related or implied technologies.
 
 Extract these fields:
 
-1. "skills": array of strings. Technical skills/tools/languages/frameworks explicitly named
+1. "name": string. The candidate's full name.
+
+2. "college": string. The university or college name (e.g. "BITS Pilani", "VIT Vellore").
+
+3. "department": string. Classify the candidate's field of study into one of these exact values: "cse", "data_science", "mba", "design", or "other".
+   - "cse" for Computer Science, IT, Software Engineering.
+   - "data_science" for Data Science, AI, Machine Learning.
+   - "mba" for Management, Business Administration, BBA.
+   - "design" for UI/UX Design, Interaction Design, Product Design.
+   - "other" for non-tech / other fields.
+
+4. "branch": string. The specific branch or major of study (e.g. "Computer Science and Engineering", "Finance", "User Experience Design").
+
+5. "graduation_year": number or null. The year of graduation (e.g. 2026, 2025). Null if not found.
+
+6. "skills": array of strings. Technical skills/tools/languages/frameworks explicitly named
    anywhere in the resume (skills section, project bullets, experience bullets). Normalize
    only exact aliases (e.g. "ReactJS" -> "React", "Node" -> "Node.js", "Py" is NOT a valid
    alias for "Python" — do not guess abbreviations). Deduplicate.
 
-2. "projects": array of objects, each:
+7. "projects": array of objects, each:
    {{"name": string, "tech_stack": array of strings (explicit only, same rule as above),
      "summary": string, max 15 words, in your own words}}
 
-3. "experience_years": number. Sum of professional (full-time or paid part-time) experience
+8. "experience_years": number. Sum of professional (full-time or paid part-time) experience
    only. Internships count as 0 toward this unless the resume itself frames them as full-time
    professional roles. If the resume is clearly a student/fresher resume with no professional
    roles, return 0.
 
-4. "education_level": one of ["Undergraduate", "Postgraduate", "PhD"] — based on the highest
+9. "education_level": one of ["Undergraduate", "Postgraduate", "PhD"] — based on the highest
    degree in progress or completed.
 
-5. "certifications": array of strings. Only formally named certifications or credentials
-   (e.g. "AWS Certified Cloud Practitioner"). Do NOT include short online courses mentioned
-   in passing (e.g. "completed a course on X") unless the resume explicitly calls it a
-   certification or credential.
+10. "certifications": array of strings. Only formally named certifications or credentials
+    (e.g. "AWS Certified Cloud Practitioner"). Do NOT include short online courses mentioned
+    in passing (e.g. "completed a course on X") unless the resume explicitly calls it a
+    certification or credential.
 
-6. "years_since_graduation": number or null. Null if still enrolled / no graduation date stated.
+11. "years_since_graduation": number or null. Null if still enrolled / no graduation date stated.
 
 If a field cannot be determined from the text, use an empty array, 0, or null as appropriate —
 never fabricate a plausible-sounding value.
@@ -363,10 +378,18 @@ def compute_gap_analysis(resume_data: dict, jd_data: dict) -> dict:
     }
 
 
-def evaluate_resume_for_job(resume_text: str, job_title: str, company: str, job_description: str) -> str:
+def evaluate_resume_for_job(resume_text: str, job_title: str, company: str, job_description: str, profile_skills: list = None) -> str:
     """Evaluates candidate resume using 4-signal gap analysis + LLM recruiter advice."""
     # 1. Structured parse of the candidate resume
     resume_data = parse_skills_from_resume(resume_text)
+    if not resume_data:
+        resume_data = {"skills": []}
+
+    if profile_skills:
+        # Union/merge manual onboarding profile skills with resume-extracted skills
+        existing_skills = set(resume_data.get("skills", []))
+        existing_skills.update(str(s).lower().strip() for s in profile_skills if s)
+        resume_data["skills"] = list(existing_skills)
 
     # 2. Structured parse of the JD
     from jd_skill_extractor import extract_skills_from_jd
@@ -374,6 +397,16 @@ def evaluate_resume_for_job(resume_text: str, job_title: str, company: str, job_
     if not jd_data:
         jd_data = {"required_skills": [], "preferred_skills": []}
     jd_data["job_title"] = job_title  # passed into edu fit check
+
+    # Check for empty extracted required skills (due to API rate limit/error)
+    if not jd_data.get("required_skills"):
+        report = (
+            f"💪 *Strengths*\n⚠️ Analysis limited (API rate-limited)\n\n"
+            f"⚠️ *Needs Improvement*\n⚠️ Analysis limited (API rate-limited)\n\n"
+            f"🎯 *Recommendation*\nReview Manually 🔍\n\n"
+            f"🧠 *Recruiter take:*\nWe temporarily couldn't extract the precise technical requirements for this job due to Gemini API rate limits. Please review the job description manually to see if your background matches!"
+        )
+        return report
 
     # 3. Multi-signal gap analysis
     gaps = compute_gap_analysis(resume_data, jd_data)

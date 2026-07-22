@@ -8,6 +8,174 @@ from embeddings import calculate_cosine_similarity, get_embeddings_from_hf
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Skill synonym map — maps every known alias to a canonical form.
+# Both student skills AND job skills are normalised through this before comparison
+# so "Postgres", "PostgreSQL", "psql" all map to "postgresql".
+# ---------------------------------------------------------------------------
+_SKILL_SYNONYMS: dict[str, str] = {
+    # Python ecosystem
+    "py":               "python",
+
+    # Node.js
+    "node":             "nodejs",
+    "node.js":          "nodejs",
+    "node js":          "nodejs",
+
+    # Go
+    "golang":           "go",
+
+    # Databases
+    "postgres":         "postgresql",
+    "psql":             "postgresql",
+    "pg":               "postgresql",
+    "mongo":            "mongodb",
+    "elastic":          "elasticsearch",
+    "es":               "elasticsearch",
+    "dynamo":           "dynamodb",
+    "dynamodb":         "dynamodb",
+    "couch":            "couchdb",
+    "maria":            "mariadb",
+    "mssql":            "sqlserver",
+    "sql server":       "sqlserver",
+    "microsoft sql":    "sqlserver",
+
+    # Cloud
+    "gcp":              "googlecloud",
+    "google cloud":     "googlecloud",
+    "google cloud platform": "googlecloud",
+    "aws":              "aws",
+    "amazon web services": "aws",
+    "azure":            "azure",
+    "microsoft azure":  "azure",
+
+    # Infrastructure
+    "k8s":              "kubernetes",
+    "kube":             "kubernetes",
+    "docker compose":   "docker",
+    "ci/cd":            "cicd",
+    "ci cd":            "cicd",
+    "github actions":   "githubactions",
+    "gitlab ci":        "gitlabci",
+
+    # Messaging / Streaming
+    "apache kafka":     "kafka",
+    "apache spark":     "spark",
+    "apache airflow":   "airflow",
+    "rabbit":           "rabbitmq",
+    "rabbitmq":         "rabbitmq",
+    "celery":           "celery",
+
+    # ML
+    "tensorflow":       "tensorflow",
+    "tf":               "tensorflow",
+    "pytorch":          "pytorch",
+    "torch":            "pytorch",
+    "sklearn":          "scikitlearn",
+    "scikit-learn":     "scikitlearn",
+    "scikit learn":     "scikitlearn",
+    "hugging face":     "huggingface",
+    "hf":               "huggingface",
+
+    # Frontend
+    "reactjs":          "react",
+    "react.js":         "react",
+    "vuejs":            "vue",
+    "vue.js":           "vue",
+    "nextjs":           "nextjs",
+    "next.js":          "nextjs",
+    "nuxtjs":           "nuxtjs",
+    "nuxt.js":          "nuxtjs",
+    "angular":          "angular",
+    "angularjs":        "angular",
+    "js":               "javascript",
+    "ts":               "typescript",
+
+    # Backend frameworks
+    "fastapi":          "fastapi",
+    "fast api":         "fastapi",
+    "django rest":      "django",
+    "django rest framework": "django",
+    "drf":              "django",
+    "spring boot":      "springboot",
+    "spring":           "springboot",
+    "express":          "expressjs",
+    "express.js":       "expressjs",
+    "nestjs":           "nestjs",
+    "nest.js":          "nestjs",
+    "flask":            "flask",
+    "gin":              "gin",  # Go Gin framework
+    "fiber":            "fiber", # Go Fiber framework
+
+    # Version control
+    "github":           "git",
+    "gitlab":           "git",
+    "bitbucket":        "git",
+
+    # Systems
+    "unix":             "linux",
+    "ubuntu":           "linux",
+    "centos":           "linux",
+    "debian":           "linux",
+    "macos":            "macos",
+
+    # ORM / Query
+    "sqlalchemy":       "sqlalchemy",
+    "prisma":           "prisma",
+    "sequelize":        "sequelize",
+    "hibernate":        "hibernate",
+
+    # Tools
+    "vscode":           "vscode",
+    "vs code":          "vscode",
+    "intellij":         "intellij",
+    "pycharm":          "pycharm",
+
+    # Languages — common abbreviations
+    "c++":              "cpp",
+    "c plus plus":      "cpp",
+    "c#":               "csharp",
+    "c sharp":          "csharp",
+    "dotnet":           "csharp",
+    ".net":             "csharp",
+    "kotlin":           "kotlin",
+    "swift":            "swift",
+    "ruby":             "ruby",
+    "r":                "rlang",
+    "rust":             "rust",
+    "scala":            "scala",
+    "perl":             "perl",
+    "php":              "php",
+    "lua":              "lua",
+    "shell":            "bash",
+    "bash scripting":   "bash",
+    "shell scripting":  "bash",
+}
+
+
+def _norm_skill(skill: str) -> str:
+    """
+    Normalise a skill name for synonym-aware comparison.
+
+    Steps:
+    1. Lowercase + strip whitespace
+    2. Strip punctuation that doesn't change meaning (trailing dots, parens)
+    3. Lookup in _SKILL_SYNONYMS — map to canonical form if found
+    4. Remove all non-alphanumeric characters for final comparison key
+
+    Examples:
+        "PostgreSQL" → "postgresql"
+        "Postgres"   → "postgresql"  (synonym map)
+        "Node.js"    → "nodejs"
+        "node"       → "nodejs"  (synonym map)
+        "K8s"        → "kubernetes"  (synonym map)
+    """
+    cleaned = skill.lower().strip().rstrip(".")
+    # Check synonym map (exact cleaned string)
+    canonical = _SKILL_SYNONYMS.get(cleaned, cleaned)
+    # Remove all non-alphanumeric characters to get the final key
+    return re.sub(r"[^a-z0-9]", "", canonical)
+
+# ---------------------------------------------------------------------------
 # Tuning knobs — override via env vars without redeploying
 # ---------------------------------------------------------------------------
 MATCH_THRESHOLD = float(os.getenv("MATCH_THRESHOLD", "0.15"))
@@ -111,31 +279,34 @@ def get_experience_tag(title: str, description: str = "") -> str:
         return "👑 Director / VP"
     if re.search(r"\b(engineering manager|tech lead|team lead|lead engineer|engineering lead|lead)\b", t):
         return "🏆 Manager / Lead"
-    if re.search(r"\b(principal|staff|architect|sde-3|sde iii|sde3|sdeiii)\b", t):
+    if (
+        re.search(r"\b(principal|staff|architect|sde-3|sde iii|sde3|sdeiii|pmts)\b", t)
+        or re.search(r"\b(?:engineer|developer|sde|swe|analyst|qa|specialist|mts)[\s-]*(?:iv|v|4|5|6)\b", t)
+    ):
         return "⚡ Staff / Principal"
 
     # ── Senior / SDE-2 detection ──────────────────────────────────────────────
-    # Catches: Senior, Sr., SDE-2, SDE-II, SDE 2, SDE2, SDE II, SDEii
-    # Also: "Software Development Engineer-II", "Software Engineer 2", "SWE-2"
-    if re.search(r"\b(senior|sr\.?)\b", t):
-        return "🚀 Senior (5+ yrs)"
-    if re.search(
-        r"\b(?:sde|swe|software\s+(?:development\s+)?engineer)(?:[\s-]*(?:ii|2))\b",
-        t
+    # Catches: Senior, Sr., SDE-2, SDE-II, SDE 2, SDE2, SDE II, SDEii, SMTs, etc.
+    # Also numeric/roman level 3 (e.g. Support Engineer 3, QA Engineer III)
+    if (
+        re.search(r"\b(senior|sr\.?|smts|lmts)\b", t)
+        or re.search(r"\b(?:engineer|developer|sde|swe|analyst|qa|specialist|mts)[\s-]*(?:iii|3)\b", t)
     ):
-        return "💼 Mid-level (2-5 yrs)"  # SDE-2 = 2-4 years, mid not senior
-    if re.search(r"\bengineer[\s-]*ii\b", t):
-        return "💼 Mid-level (2-5 yrs)"
-    if re.search(r"\bengineer[\s-]*2\b", t):
+        return "🚀 Senior (5+ yrs)"
+
+    if (
+        re.search(r"\b(?:sde|swe|software\s+(?:development\s+)?engineer|engineer|developer|qa|analyst|specialist|mts)[\s-]*(?:ii|2)\b", t)
+        or re.search(r"\b(mid-level|mid level|experienced)\b", t)
+    ):
         return "💼 Mid-level (2-5 yrs)"
     # ── End senior / SDE-2 detection ─────────────────────────────────────────
 
-    if re.search(r"\b(junior|jr\.?|sde-1|sde i|sde1|associate)\b", t):
+    if (
+        re.search(r"\b(junior|jr\.?|sde-1|sde i|sde1|associate)\b", t)
+        or re.search(r"\b(?:engineer|developer|sde|swe|analyst|qa|specialist|mts)[\s-]*(?:i|1)\b", t)
+    ):
         return "🔵 Junior (0-2 yrs)"
-    if re.search(r"\bengineer[\s-]*(?:i|1)\b", t):
-        return "🔵 Junior (0-2 yrs)"
-    if re.search(r"\b(mid-level|mid level|experienced)\b", t):
-        return "💼 Mid-level (2-5 yrs)"
+
     return "💼 Software Engineer"
 
 
@@ -365,27 +536,88 @@ _W_TITLE  = 0.40   # title proportion of semantic
 _W_JD     = 0.60   # JD proportion of semantic (when description present)
 
 
-def _skills_overlap_score(student_skills: list, job_title: str, job_desc: str) -> float:
+def _skills_overlap_score(
+    student_skills: list,
+    job_title: str,
+    job_desc: str,
+    job_required_skills: list | None = None,
+    job_preferred_skills: list | None = None,
+) -> float:
     """
-    Signal 1 — Skills keyword overlap.
+    Signal 2 — Synonym-aware, structured-first skill overlap.
 
-    Checks how many of the student's skills appear (case-insensitive, word-boundary)
-    in the job title + description. Returns 0-1.
+    TWO-PATH SCORING:
 
-    E.g. student has [Python, Django, Redis], job mentions Python + Django = 2/3 = 0.67
+    Path A — Structured skills (preferred): When the job has Gemini-extracted
+    required_skills[], compare normalised student skills against that clean list.
+    This is far more accurate than raw text scan because:
+      - Skills are atomic ("PostgreSQL" not "experience with databases")
+      - No false positives from skill words appearing in prose
+      - Preferred skills give a bonus on top of required skills score
+
+    Path B — Raw text fallback: When required_skills[] is empty or None,
+    fall back to word-boundary regex scan of job title + description text.
+    This ensures we always return a signal even for un-extracted jobs.
+
+    Both paths use _norm_skill() for synonym normalisation:
+      "Postgres" and "PostgreSQL" now correctly match each other.
+
+    Scoring:
+      Path A:
+        base  = matched_required / total_required     (0–1)
+        bonus = 0.05 * min(matched_preferred, 3)      (up to +0.15)
+        Final = min(1.0, base + bonus)
+      Path B:
+        matched / total_student_skills                (0–1)
+
+    Returns:
+        float in [0.0, 1.0]. Returns 0.4 (neutral-low) when student has no skills.
     """
     if not student_skills:
-        return 0.5  # neutral when no skills set
+        return 0.4  # neutral-low: no skills set → small penalty vs 0.5 to reduce false positives
 
+    student_norm = {_norm_skill(s) for s in student_skills}
+
+    # ── Path A: Structured Gemini-extracted skills ────────────────────────────
+    if job_required_skills:  # non-empty list from jd_skill_extractor
+        required_norm = [_norm_skill(s) for s in job_required_skills]
+        total_required = len(required_norm)
+
+        matched_required = sum(1 for s in required_norm if s in student_norm)
+        base = matched_required / total_required if total_required else 0.0
+
+        # Preferred skills bonus: each matched preferred skill adds 0.05 (cap 3)
+        bonus = 0.0
+        if job_preferred_skills:
+            preferred_norm = [_norm_skill(s) for s in job_preferred_skills]
+            matched_preferred = sum(1 for s in preferred_norm if s in student_norm)
+            bonus = 0.05 * min(matched_preferred, 3)
+
+        score = min(1.0, base + bonus)
+        logger.debug(
+            "[skills_overlap] Structured path: req=%d matched=%d pref_bonus=%.2f → %.3f",
+            total_required, matched_required, bonus, score,
+        )
+        return round(score, 4)
+
+    # ── Path B: Raw text fallback (no extracted skills yet) ───────────────────
     haystack = (job_title + " " + job_desc).lower()
     matched = 0
     for skill in student_skills:
-        # Word-boundary aware: "go" shouldn't match "good" or "Django"
-        pattern = r"\b" + re.escape(str(skill).lower().strip()) + r"\b"
-        if re.search(pattern, haystack):
-            matched += 1
+        skill_clean = str(skill).lower().strip()
+        # Try both the original form and the synonym-normalised form
+        patterns = {skill_clean, _SKILL_SYNONYMS.get(skill_clean, skill_clean)}
+        for pat in patterns:
+            if pat and re.search(r"\b" + re.escape(pat) + r"\b", haystack):
+                matched += 1
+                break
 
-    return matched / len(student_skills)
+    score = matched / len(student_skills)
+    logger.debug(
+        "[skills_overlap] Raw-text path: student_skills=%d matched=%d → %.3f",
+        len(student_skills), matched, score,
+    )
+    return round(score, 4)
 
 
 def _experience_score(job_title: str, job_desc: str, grad_year: int, current_year: int) -> float:
@@ -488,12 +720,16 @@ def _score_jobs(jobs: list, student: dict, roles: list, embed_fn) -> tuple[list[
       cosine(profile_embedding, title_embedding + JD_embedding)
       Profile text is built from skills, roles, grad level.
 
-    Signal 2 — Skills keyword overlap (weight _W_SKILLS):
-      Fraction of student.skills[] that appear as keywords in job title + description.
-      Direct, interpretable, and fast (no embedding needed).
+    Signal 2 — Skills overlap (weight _W_SKILLS) — STRUCTURED-FIRST:
+      When the job has Gemini-extracted required_skills[], compares normalised
+      student skills against that clean structured list.
+      Falls back to raw JD text scan when required_skills is not yet available.
+      Both paths use synonym normalisation (_norm_skill) so
+      'Postgres' correctly matches 'PostgreSQL' etc.
 
     Signal 3 — Experience compatibility (weight _W_EXP):
-      How well the role's seniority level matches the student's grad year.
+      Uses min_years_experience from jobs_cache when available (Gemini-extracted)
+      for precise year-requirement matching. Falls back to title-based tag inference.
       1.0 = perfect level fit, 0.0 = completely wrong level.
 
     Signal 4 — Location compatibility (weight _W_LOCATION):
@@ -580,11 +816,33 @@ def _score_jobs(jobs: list, student: dict, roles: list, embed_fn) -> tuple[list[
         else:
             sem_score = title_sim
 
-        # ── Signal 2: Skills keyword overlap ──────────────────────────────────
-        skill_score = _skills_overlap_score(student_skills, title, desc)
+        # ── Signal 2: Skills overlap (structured-first) ───────────────────────
+        job_required  = job.get("required_skills") or []
+        job_preferred = job.get("preferred_skills") or []
+        skill_score = _skills_overlap_score(
+            student_skills, title, desc,
+            job_required_skills=job_required,
+            job_preferred_skills=job_preferred,
+        )
 
         # ── Signal 3: Experience compatibility ────────────────────────────────
-        exp_score = _experience_score(title, desc, grad_year, current_year)
+        # Use Gemini-extracted min_years_experience when present — it's more
+        # precise than regex parsing the description inside _experience_score.
+        min_exp_from_db = job.get("min_years_experience")  # int or None
+        if min_exp_from_db is not None and min_exp_from_db > 0:
+            # Override the description-level regex with the structured value
+            years_since_grad = current_year - grad_year
+            over_by = years_since_grad - min_exp_from_db
+            if over_by >= 0:
+                # Student meets or exceeds the requirement
+                exp_score = min(1.0, 0.80 + 0.05 * over_by)   # e.g. 0yr over → 0.80, 1yr → 0.85
+            else:
+                # Student is under the requirement
+                under_by = abs(over_by)
+                exp_score = max(0.05, 0.70 - 0.20 * under_by)  # e.g. 1yr under → 0.50, 3yr → 0.10
+            exp_score = round(exp_score, 4)
+        else:
+            exp_score = _experience_score(title, desc, grad_year, current_year)
 
         # ── Signal 4: Location compatibility ──────────────────────────────────
         loc_score = _location_score(loc, pref_locs)
@@ -686,23 +944,58 @@ def match_jobs_for_student(
 
 
 def build_match_reason(job: dict, student: dict) -> str:
-    """Build a short human-readable explanation of why a job matched."""
+    """
+    Build a short human-readable explanation of why a job matched.
+
+    Priority order:
+    1. Matched structured required_skills[] from Gemini extraction (most accurate)
+    2. Matched skills found in job description text (fallback)
+    3. Role keyword match
+    4. Experience level fit
+    """
     reasons = []
+    student_skills = student.get("skills") or []
+    student_norm = {_norm_skill(s) for s in student_skills}
+
+    # ── Priority 1: Match against structured Gemini-extracted required skills ──
+    job_required = job.get("required_skills") or []
+    if job_required:
+        matched_structured = [
+            s for s in job_required
+            if _norm_skill(s) in student_norm
+        ]
+        if matched_structured:
+            skill_names = ", ".join(matched_structured[:3])
+            reasons.append(f"You have {len(matched_structured)}/{len(job_required)} required skills ({skill_names}...)" if len(job_required) > 3 else f"Skills match: {skill_names}")
+
+    # ── Priority 2: Fallback — match against raw JD text ──────────────────────
+    if not reasons:
+        desc = (job.get("description") or "").lower()
+        title_lower = job["title"].lower()
+        haystack = title_lower + " " + desc
+        matched_text = []
+        for s in student_skills:
+            s_clean = s.lower().strip()
+            if re.search(r"\b" + re.escape(s_clean) + r"\b", haystack):
+                matched_text.append(s)
+        if matched_text:
+            reasons.append(f"Matches your {', '.join(matched_text[:2])} skills")
+
+    # ── Priority 3: Role keyword match ────────────────────────────────────────
     title_lower = job["title"].lower()
-    skills = student.get("skills") or []
-    matched_skills = [s for s in skills if s.lower() in title_lower]
-    if matched_skills:
-        reasons.append(f"Matches your {', '.join(matched_skills[:2])} skills")
-    roles = student.get("preferred_roles") or []
-    for role in roles:
+    preferred_roles = student.get("preferred_roles") or []
+    for role in preferred_roles:
         keywords = keyword_map.get(role, [])
         if any(k in title_lower for k in keywords):
             reasons.append(f"{role.capitalize()} role")
             break
+
+    # ── Priority 4: Experience level fit ─────────────────────────────────────
     grad_year = student.get("graduation_year", datetime.now().year)
     fit = get_graduation_tag(job["title"], grad_year)
     if "Good" in fit:
         reasons.append("Fresher-friendly")
+
     if not reasons:
         reasons.append("Matches your profile")
     return " · ".join(reasons)

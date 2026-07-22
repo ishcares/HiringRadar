@@ -45,7 +45,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 # Conversation states
-NAME, COLLEGE, DEPARTMENT, BRANCH, GRAD_YEAR, EXP_LEVEL, RESUME_UPLOAD, SKILLS, ROLES, JOB_TYPE, EDIT_COLLEGE, EDIT_DEPARTMENT = range(12)
+NAME, COLLEGE, DEPARTMENT, BRANCH, GRAD_YEAR, EXP_LEVEL, RESUME_UPLOAD, SKILLS, ROLES, JOB_TYPE, EDIT_COLLEGE, EDIT_DEPARTMENT, ONBOARD_CONFIRM, PREF_LOCATIONS = range(14)
 def get_time_ago_string(scraped_at_str: str) -> str:
     """Returns a 'time ago' string for the scraped timestamp."""
     from datetime import datetime, timezone
@@ -125,15 +125,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Initialize user_data and save referrer if present
     context.user_data['referred_by_code'] = referrer_code
 
+    upload_keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✏️ Fill profile manually", callback_data="onboard_resume:skip")]
+    ])
     await update.message.reply_text(
         "👋 Welcome to *HiringRadar!*\n\n"
-        "Get real-time job alerts from top Indian product companies — "
-        "Razorpay, CRED, Groww, PhonePe and more.\n\n"
-        "Let's set up your profile in 5 quick steps 🚀\n\n"
-        "*What's your name?*",
+        "Get real-time matching job alerts from top product companies — "
+        "CRED, Swiggy, Groww, Amazon, PhonePe and more.\n\n"
+        "📄 *Please upload your resume (PDF)* to automatically extract your skills, college, branch, and graduation year and set up your profile in 10 seconds! ⚡\n\n"
+        "_(Or click below to type your details manually)_",
+        reply_markup=upload_keyboard,
         parse_mode="Markdown"
     )
-    return NAME
+    return RESUME_UPLOAD
 
 async def start_onboarding_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -325,51 +329,39 @@ async def get_exp_level(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['years_of_experience'] = exp_years_map.get(exp_val, 0)
 
     label = exp_label_map.get(exp_val, exp_val)
-    upload_keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📄 Upload Resume (auto-extract skills)", callback_data="onboard_resume:upload")],
-        [InlineKeyboardButton("✏️ Type my skills manually", callback_data="onboard_resume:skip")],
-    ])
     await query.message.reply_text(
         f"✅ *{label}* selected.\n\n"
-        "📄 *Upload your resume (PDF)* to auto-extract your skills — or type them manually.",
-        reply_markup=upload_keyboard,
+        "💻 *What are your top skills?*\n\nSend comma separated: *Python, React, SQL, ML*",
         parse_mode="Markdown"
     )
-    return RESUME_UPLOAD
+    return SKILLS
 
 
 async def handle_onboarding_resume_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles Upload / Skip choice after experience level selection."""
+    """Handles manual fallback choice from start."""
     query = update.callback_query
     await query.answer()
     choice = query.data.replace("onboard_resume:", "")
 
-    if choice == "upload":
-        await query.message.reply_text(
-            "📤 *Send your resume as a PDF file now.*\n\n"
-            "_Your skills will be automatically extracted from it._",
-            parse_mode="Markdown"
-        )
-        return RESUME_UPLOAD  # wait for document
-    else:
+    if choice == "skip":
         # User chose to type manually
         await query.message.reply_text(
-            "💻 What are your top skills?\n\nSend comma separated: *Python, React, SQL, ML*",
+            "✍️ Let's fill your details manually.\n\n*What's your name?*",
             parse_mode="Markdown"
         )
-        return SKILLS
+        return NAME
+    return RESUME_UPLOAD
 
 
 async def handle_onboarding_resume_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Parses uploaded PDF during onboarding and extracts skills into user_data."""
+    """Parses uploaded PDF during onboarding and extracts structured details."""
     document = update.message.document
     if not document or not document.file_name.lower().endswith(".pdf"):
-        await update.message.reply_text("⚠️ Please send a PDF file, or type /cancel and enter skills manually.")
+        await update.message.reply_text("⚠️ Please send a PDF file, or click 'Fill profile manually' above.")
         return RESUME_UPLOAD
 
-    await update.message.reply_text("⏳ Reading your resume...")
+    await update.message.reply_text("⏳ Reading and analyzing your resume with AI...")
 
-    import tempfile
     local_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp_resumes")
     os.makedirs(local_dir, exist_ok=True)
     chat_id = update.effective_chat.id
@@ -384,80 +376,247 @@ async def handle_onboarding_resume_pdf(update: Update, context: ContextTypes.DEF
 
         if not resume_text:
             await update.message.reply_text(
-                "⚠️ Couldn't extract text from this PDF. It may be scanned.\n\n"
-                "💻 Please type your skills manually (comma separated):"
+                "⚠️ Couldn't extract text from this PDF. It may be a scanned image.\n\n"
+                "✍️ Let's type your details manually.\n\n*What's your name?*",
+                parse_mode="Markdown"
             )
-            return SKILLS
+            return NAME
 
-        # Use ai_agent to parse skills from resume text
+        # Use ai_agent to parse profile details from resume text
         from ai_agent import parse_skills_from_resume
         resume_data = await asyncio.to_thread(parse_skills_from_resume, resume_text)
-        skills = resume_data.get("skills", [])
-        if not skills:
-            await update.message.reply_text(
-                "⚠️ Couldn't detect skills from your resume.\n\n"
-                "💻 Please type your skills manually (comma separated):"
-            )
-            return SKILLS
+        
+        name = resume_data.get("name") or update.effective_user.first_name
+        college = resume_data.get("college") or "Not specified"
+        branch = resume_data.get("branch") or "Not specified"
+        dept_val = resume_data.get("department") or "cse"
+        grad_year = resume_data.get("graduation_year") or 2026
+        skills = resume_data.get("skills") or []
+        exp_years = resume_data.get("experience_years") or 0
 
+        # Map experience_years to experience_level
+        if exp_years >= 4:
+            exp_level = "senior"
+            exp_label = "3+ years"
+        elif exp_years >= 2:
+            exp_level = "mid"
+            exp_label = "1-3 years"
+        elif exp_years >= 1:
+            exp_level = "junior1"
+            exp_label = "Up to 1 year"
+        else:
+            exp_level = "fresher"
+            exp_label = "Fresher / Student (0 yrs)"
+
+        context.user_data['name'] = name
+        context.user_data['college'] = college
+        context.user_data['department'] = dept_val
+        context.user_data['branch'] = branch
+        context.user_data['graduation_year'] = grad_year
         context.user_data['skills'] = skills
+        context.user_data['experience_level'] = exp_level
+        context.user_data['years_of_experience'] = exp_years
         context.user_data['resume_text'] = resume_text
 
+        dept_names = {"cse": "CSE/IT", "data_science": "Data Science / AI", "mba": "MBA/Business", "design": "Design", "other": "Other"}
+        dept_label = dept_names.get(dept_val, dept_val.upper())
+
+        skills_str = ", ".join(skills[:15]) if skills else "None detected"
+        if len(skills) > 15:
+            skills_str += f" (+{len(skills)-15} more)"
+
+        confirmation_card = (
+            f"📝 *Extracted Profile Details:*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n"
+            f"👤 *Name:* {name}\n"
+            f"🏢 *College:* {college}\n"
+            f"🎓 *Branch:* {branch} ({dept_label})\n"
+            f"📅 *Graduation Year:* {grad_year}\n"
+            f"💼 *Experience:* {exp_label}\n"
+            f"💻 *Skills:* {skills_str}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"Are these details correct?"
+        )
+
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("✅ Correct — Proceed ➔", callback_data="onboard_confirm:yes")],
+            [InlineKeyboardButton("✏️ Edit Manually", callback_data="onboard_confirm:edit")]
+        ])
+
         await update.message.reply_text(
-            f"✅ *Skills extracted from resume:*\n{', '.join(skills[:20])}\n\n"
-            "🎯 What roles are you interested in?\n\n"
-            "Choose from: backend / frontend / ml / data / devops / fullstack / android / ios\n\n"
-            "Send comma separated: *backend, ml*",
+            confirmation_card,
+            reply_markup=keyboard,
             parse_mode="Markdown"
         )
-        return ROLES
+        return ONBOARD_CONFIRM
 
     except Exception as e:
         print(f"Onboarding resume parse failed: {e}")
+        if os.path.exists(local_path):
+            os.remove(local_path)
         await update.message.reply_text(
             "⚠️ Something went wrong reading your PDF.\n\n"
-            "💻 Please type your skills manually (comma separated):"
+            "✍️ Let's fill your details manually.\n\n*What's your name?*",
+            parse_mode="Markdown"
         )
-        return SKILLS
+        return NAME
 
 async def get_skills(update: Update, context: ContextTypes.DEFAULT_TYPE):
     skills = [s.strip() for s in update.message.text.split(",")]
     context.user_data['skills'] = skills
+    
+    # Inline buttons for clean role selection:
+    keyboard = [
+        [
+            InlineKeyboardButton("🖥️ Backend", callback_data="roles:backend"),
+            InlineKeyboardButton("🎨 Frontend", callback_data="roles:frontend")
+        ],
+        [
+            InlineKeyboardButton("📈 AI/ML", callback_data="roles:ml"),
+            InlineKeyboardButton("📊 Data", callback_data="roles:data")
+        ],
+        [
+            InlineKeyboardButton("✨ All Tech Roles", callback_data="roles:all_tech")
+        ]
+    ]
     await update.message.reply_text(
-        "🎯 What roles are you interested in?\n\n"
-        "Choose from: backend / frontend / ml / data / devops / fullstack / android / ios\n\n"
-        "Send comma separated: *backend, ml*",
+        "🎯 *What roles are you interested in?*\n\nChoose an option below or type them manually (comma-separated, e.g. backend, ml):",
+        reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown"
     )
     return ROLES
 
-async def get_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    valid = list(keyword_map.keys())
-    roles = [r.strip().lower() for r in update.message.text.split(",")]
-    invalid = [r for r in roles if r not in valid]
-    if invalid:
-        await update.message.reply_text(
-            f"❌ Unknown roles: {', '.join(invalid)}\n\n"
-            f"Please choose from: {', '.join(valid)}\n\n"
-            f"Send comma separated (e.g., *backend, ml*):",
+
+async def confirm_onboarding_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Callback query handler for ONBOARD_CONFIRM step."""
+    query = update.callback_query
+    await query.answer()
+    confirm_val = query.data.replace("onboard_confirm:", "")
+
+    if confirm_val == "yes":
+        # Proceed to step 2: Preferences (Job Type)
+        keyboard = [
+            [
+                InlineKeyboardButton("🌱 Internship", callback_data="job_type:internship"),
+                InlineKeyboardButton("💼 Full-time", callback_data="job_type:fulltime")
+            ],
+            [
+                InlineKeyboardButton("✨ Both", callback_data="job_type:both")
+            ]
+        ]
+        await query.message.reply_text(
+            "💼 *Are you looking for an internship or full-time position?*",
+            reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown"
         )
-        return ROLES
+        return JOB_TYPE
+    else:
+        # Fallback to manual flow
+        await query.message.reply_text(
+            "✍️ Let's fill your details manually.\n\n*What's your name?*",
+            parse_mode="Markdown"
+        )
+        return NAME
+
+
+async def get_roles(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if query:
+        await query.answer()
+        role_data = query.data.replace("roles:", "")
+        if role_data == "all_tech":
+            roles = ["backend", "frontend", "ml", "data", "devops", "fullstack", "android", "ios"]
+        else:
+            roles = [role_data]
+    else:
+        valid = list(keyword_map.keys())
+        roles = [r.strip().lower() for r in update.message.text.split(",")]
+        invalid = [r for r in roles if r not in valid]
+        if invalid:
+            await update.message.reply_text(
+                f"❌ Unknown roles: {', '.join(invalid)}\n\n"
+                f"Please choose from: {', '.join(valid)}\n\n"
+                f"Send comma separated (e.g., *backend, ml*):",
+                parse_mode="Markdown"
+            )
+            return ROLES
 
     context.user_data['preferred_roles'] = roles
-    await update.message.reply_text(
-        "💼 Are you looking for?\n\n*internship* / *fulltime* / *both*",
-        parse_mode="Markdown"
-    )
-    return JOB_TYPE
+
+    # Now ask for Preferred Locations!
+    keyboard = [
+        [
+            InlineKeyboardButton("📍 Bangalore", callback_data="loc:bangalore"),
+            InlineKeyboardButton("📍 Pune / Mumbai", callback_data="loc:pune_mumbai")
+        ],
+        [
+            InlineKeyboardButton("🌍 Remote Only", callback_data="loc:remote"),
+            InlineKeyboardButton("✨ Any Location", callback_data="loc:any")
+        ]
+    ]
+    msg = "📍 *Select your preferred locations:*\n\nChoose an option or type cities manually (comma-separated, e.g. Pune, Noida):"
+    if query:
+        await query.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    else:
+        await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    return PREF_LOCATIONS
+
 
 async def get_job_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    job_type = update.message.text.strip().lower()
+    query = update.callback_query
+    if query:
+        await query.answer()
+        job_type = query.data.replace("job_type:", "")
+    else:
+        job_type = update.message.text.strip().lower()
+
     if job_type not in ["internship", "fulltime", "both"]:
         await update.message.reply_text("Please send: internship / fulltime / both")
         return JOB_TYPE
 
     context.user_data['job_type'] = job_type
+
+    # Ask for preferred roles
+    keyboard = [
+        [
+            InlineKeyboardButton("🖥️ Backend", callback_data="roles:backend"),
+            InlineKeyboardButton("🎨 Frontend", callback_data="roles:frontend")
+        ],
+        [
+            InlineKeyboardButton("📈 AI/ML", callback_data="roles:ml"),
+            InlineKeyboardButton("📊 Data", callback_data="roles:data")
+        ],
+        [
+            InlineKeyboardButton("✨ All Tech Roles", callback_data="roles:all_tech")
+        ]
+    ]
+    msg = "🎯 *What roles are you interested in?*\n\nChoose an option below or type them manually (comma-separated, e.g. backend, ml):"
+    if query:
+        await query.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    else:
+        await update.message.reply_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    return ROLES
+
+
+async def get_onboarding_locations(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if query:
+        await query.answer()
+        loc_data = query.data.replace("loc:", "")
+        if loc_data == "pune_mumbai":
+            locations = ["pune", "mumbai"]
+        elif loc_data == "any":
+            locations = ["any"]
+        else:
+            locations = [loc_data]
+    else:
+        locations = [loc.strip().lower() for loc in update.message.text.split(",")]
+
+    context.user_data['preferred_locations'] = locations
+    return await save_profile_and_show_matches(update, context)
+
+
+async def save_profile_and_show_matches(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = context.user_data
     chat_id = update.effective_chat.id
 
@@ -477,8 +636,9 @@ async def get_job_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "skills": data['skills'],
             "preferred_roles": data['preferred_roles'],
             "job_type": data['job_type'],
+            "preferred_locations": data.get('preferred_locations', ['any']),
             "referral_code": referral_code,
-            "resume_text": data.get('resume_text'),  # None if they typed skills manually
+            "resume_text": data.get('resume_text'),
         }).execute()
 
         # If referred by someone, record it and potentially reward the referrer
@@ -503,7 +663,9 @@ async def get_job_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         print(f"Supabase upsert failed: {e}")
-        await update.message.reply_text("⚠️ Couldn't save profile right now. Try /start again.")
+        query = update.callback_query
+        msg_dest = query.message if query else update.message
+        await msg_dest.reply_text("⚠️ Couldn't save profile right now. Try /start again.")
         return ConversationHandler.END
 
     # Run an immediate match check to give them instant feedback
@@ -514,6 +676,7 @@ async def get_job_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "skills": data["skills"],
         "preferred_roles": data["preferred_roles"],
         "job_type": data["job_type"],
+        "preferred_locations": data.get("preferred_locations", ["any"]),
         "department": data.get("department", "cse")
     }
     
@@ -527,16 +690,23 @@ async def get_job_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     dept_names = {"cse": "CSE/IT", "mba": "MBA/Business", "design": "Design", "other": "Other"}
     dept_label = dept_names.get(data.get('department'), 'Other')
-    await update.message.reply_text(
+    
+    confirm_text = (
         f"✅ *Profile saved, {data['name']}!*\n\n"
         f"🏢 College: {data.get('college')} ({dept_label})\n"
         f"🎓 Branch: {data['branch']} | Graduating: {data['graduation_year']}\n"
-        f"💻 Skills: {', '.join(data['skills'])}\n"
+        f"💻 Skills: {', '.join(data['skills'] if isinstance(data['skills'], list) else [])}\n"
         f"🎯 Roles: {', '.join(data['preferred_roles'])}\n"
+        f"📍 Locations: {', '.join(data.get('preferred_locations', ['any'])).title()}\n"
         f"💼 Looking for: {data['job_type']}\n\n"
-        f"{status_msg}",
-        parse_mode="Markdown"
+        f"{status_msg}"
     )
+
+    query = update.callback_query
+    if query:
+        await query.message.reply_text(confirm_text, parse_mode="Markdown")
+    else:
+        await update.message.reply_text(confirm_text, parse_mode="Markdown")
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -849,7 +1019,7 @@ async def alert_job(context: ContextTypes.DEFAULT_TYPE):
                     await asyncio.sleep(0.1)
                 
                 # Successfully sent all chunks on retry: mark these jobs as seen by the student!
-                sent_urls = [job["url"] for job, _ in chunk_pairs]
+                sent_urls = [job["url"] for chunk in chunk_pairs for job, _ in chunk]
                 await asyncio.to_thread(mark_student_seen_jobs, student["chat_id"], sent_urls)
 
             except Exception as retry_err:
@@ -1585,11 +1755,24 @@ def create_app(token):
                 CallbackQueryHandler(handle_onboarding_resume_choice, pattern="^onboard_resume:"),
                 MessageHandler(filters.Document.PDF, handle_onboarding_resume_pdf),
             ],
+            ONBOARD_CONFIRM: [
+                CallbackQueryHandler(confirm_onboarding_details, pattern="^onboard_confirm:"),
+            ],
             SKILLS:     [
                 MessageHandler(filters.TEXT & ~filters.COMMAND, get_skills)
             ],
-            ROLES:      [MessageHandler(filters.TEXT & ~filters.COMMAND, get_roles)],
-            JOB_TYPE:   [MessageHandler(filters.TEXT & ~filters.COMMAND, get_job_type)],
+            ROLES:      [
+                CallbackQueryHandler(get_roles, pattern="^roles:"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, get_roles)
+            ],
+            JOB_TYPE:   [
+                CallbackQueryHandler(get_job_type, pattern="^job_type:"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, get_job_type)
+            ],
+            PREF_LOCATIONS: [
+                CallbackQueryHandler(get_onboarding_locations, pattern="^loc:"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, get_onboarding_locations)
+            ],
             EDIT_COLLEGE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_edit_college)],
             EDIT_DEPARTMENT: [
                 CallbackQueryHandler(get_edit_department, pattern="^edept:"),

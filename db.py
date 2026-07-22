@@ -19,6 +19,8 @@ import os
 
 from dotenv import load_dotenv
 from supabase import create_client, Client
+from supabase.lib.client_options import SyncClientOptions
+import httpx
 
 load_dotenv()
 
@@ -33,7 +35,10 @@ _key: str = os.getenv("SUPABASE_KEY", "")
 if not _url or not _key:
     logger.warning("SUPABASE_URL or SUPABASE_KEY not set — DB calls will fail.")
 
-supabase: Client = create_client(_url, _key) if (_url and _key) else None  # type: ignore
+# Disable HTTP/2 to prevent HTTP/2 socket / Errno 11 connection pooling bugs
+httpx_client = httpx.Client(http2=False)
+options = SyncClientOptions(httpx_client=httpx_client)
+supabase: Client = create_client(_url, _key, options=options) if (_url and _key) else None  # type: ignore
 
 
 # ---------------------------------------------------------------------------
