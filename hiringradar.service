@@ -1,26 +1,41 @@
 [Unit]
 Description=HiringRadar Telegram Bot
-After=network-online.target postgresql.service
-Wants=network-online.target postgresql.service
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=ubuntu
 WorkingDirectory=/home/ubuntu/hiringradar
 EnvironmentFile=/home/ubuntu/hiringradar/.env
-ExecStart=/home/ubuntu/hiringradar/venv/bin/python bot.py
+ExecStart=/home/ubuntu/hiringradar/venv/bin/python -u bot.py
 Restart=always
 RestartSec=15
-# Allow extra time on first boot for sentence-transformers to download model
-TimeoutStartSec=180
+RestartSteps=5
+RestartMaxDelaySec=60
 
-# Memory guard for the 1 GB AMD free VM
-MemoryMax=900M
+# Allow extra time on first boot for sentence-transformers to load BGE model
+TimeoutStartSec=300
+
+# ── Resource limits tuned for m7i.flex.large (32 GB RAM) ──────────────────
+# Bot + BGE model + scraper + JD extractor peak at ~2 GB in practice.
+# Set a generous 6 GB ceiling so the model never gets OOM-killed mid-scrape.
+MemoryMax=6G
+MemorySwapMax=0        # Disable swap usage — fast NVMe makes it unnecessary
+CPUWeight=100          # Normal priority (200=high, 50=low)
+IOWeight=100           # Normal IO priority
+
+# Increase open file descriptor limit (scraper opens many HTTP connections)
+LimitNOFILE=65536
 
 # Logging — view with: sudo journalctl -u hiringradar -f
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=hiringradar
+
+# Log rate limiting — prevents a crash loop from flooding the journal
+LogRateLimitIntervalSec=30
+LogRateLimitBurst=500
 
 [Install]
 WantedBy=multi-user.target

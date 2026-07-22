@@ -188,11 +188,39 @@ def is_design_relevant(title: str) -> bool:
     return any(k in t for k in keywords)
 
 
+def is_finance_tech_relevant(title: str) -> bool:
+    """
+    FinTech/bank-specific tech roles that is_relevant() misses.
+    Banks use different naming conventions from product companies.
+    """
+    keywords = [
+        "technology analyst",      # JPMorgan, Goldman entry-level
+        "software analyst",
+        "associate - technology",
+        "technology associate",
+        "quantitative analyst",    # quant roles
+        "quant developer",
+        "trading technology",
+        "investment technology",
+        "markets technology",
+        "global technology",       # Citi/HSBC naming
+        "tech analyst",
+    ]
+    blocklist = [
+        "senior", "vp", "director", "head", "lead", "manager",
+        "vice president", "executive director", "managing director",
+    ]
+    t = title.lower()
+    if any(b in t for b in blocklist):
+        return False
+    return any(k in t for k in keywords)
+
+
 def check_job_relevance_and_category(title: str) -> str | None:
     """Classifies job titles into target categories or returns None if not relevant."""
     if is_data_science_relevant(title):
         return "data_science"
-    if is_relevant(title):
+    if is_relevant(title) or is_finance_tech_relevant(title):
         return "tech"
     if is_business_relevant(title):
         return "business"
@@ -831,11 +859,24 @@ def get_all_jobs():
     # ── Workday ───────────────────────────────────────────────────────────────
     for name, tenant, board, wd in [
         ("Salesforce",    "salesforce", "External_Career_Site",      12),
-        ("Samsung",       "sec",        "samsungcareers",             3),
+        # ("Samsung",       "sec",        "samsungcareers",             3), # Failed: 404
        
         # Finance / Big Tech on Workday
         ("Nvidia",        "nvidia",     "NVIDIAExternalCareerSite",    5),
-        ("Cohesity", "cohesity", "Cohesity_Careers", 5),                 
+        ("Cohesity",      "cohesity",   "Cohesity_Careers",            5),
+        # The following returned 422/NameResolutionError on Workday. Commented out for verification.
+        # ("JPMorgan Chase","jpmc",       "JPMorganChase",               1),
+        # ("Goldman Sachs", "goldmansachs","gs_external_career_website",  1),
+        # ("Barclays",      "barclays",   "BarcExternal",                1),
+        # ("Morgan Stanley","morganstanley","ExternalJobOpenings",         1),
+        # ("Visa",          "visa",       "VisaJobsGlobal",              1), # Managed via SmartRecruiters instead
+        # ("American Express","aexp",     "AmexExternalReq",             1),
+        # ("Deutsche Bank", "db",         "DBWS_ExternalJobPostings",    5),
+        # ("Citi",          "citi",       "Citi",                        1),
+        # ("Wells Fargo",   "wellsfargo", "WellsFargoJobSearch",         1),
+        # ("BNY",           "bnymellon",  "BNYMellonCareers",            2),
+        # ("State Street",  "statestreet","StateStreetCareers",          2),
+        # ("Microsoft",     "microsoft",  "MicrosoftCareers",            1),
     ]:
         try:
             jobs = scrape_workday(name, tenant, board, wd)
@@ -884,6 +925,8 @@ def get_all_jobs():
         ("Turing",       "Turing"),
         ("Games24x7",    "Games24x7"),
         ("Juspay",       "Juspay"),
+        ("Mastercard",   "Mastercard"),
+        ("Visa",         "Visa"),
     ]:
         try:
             jobs = scrape_smartrecruiters(name, company_id)
