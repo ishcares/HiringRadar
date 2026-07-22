@@ -1816,7 +1816,8 @@ def create_app(token):
     # first=30 gives scrape_job time to fill the cache before alerts run.
     app.job_queue.run_repeating(scrape_job,             interval=300,  first=10)
     app.job_queue.run_repeating(alert_job,              interval=120,  first=30)
-    app.job_queue.run_repeating(extract_jd_skills_job,  interval=1800, first=60)
+    # Commented out background JD skill extractor to save free Gemini API quota for user resume checks:
+    # app.job_queue.run_repeating(extract_jd_skills_job,  interval=1800, first=60)
 
     return app
 
