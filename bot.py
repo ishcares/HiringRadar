@@ -1573,8 +1573,25 @@ async def handle_wizard_resume_pdf(update: Update, context: ContextTypes.DEFAULT
             if os.path.exists(local_path):
                 os.remove(local_path)
             if resume_text:
-                supabase.table("students").update({"resume_text": resume_text}).eq("chat_id", chat_id).execute()
-                await update.message.reply_text("✅ *Resume updated!* Your next match analysis will use this version.", parse_mode="Markdown")
+                from ai_agent import parse_skills_from_resume
+                resume_data = await asyncio.to_thread(parse_skills_from_resume, resume_text)
+                new_skills = resume_data.get("skills", [])
+                
+                supabase.table("students").update({
+                    "resume_text": resume_text,
+                    "skills": new_skills
+                }).eq("chat_id", chat_id).execute()
+                
+                skills_str = ", ".join(new_skills[:15]) if new_skills else "None detected"
+                if len(new_skills) > 15:
+                    skills_str += f" (+{len(new_skills)-15} more)"
+                    
+                await update.message.reply_text(
+                    f"✅ *Resume updated!*\n\n"
+                    f"💻 *Extracted skills:* {skills_str}\n\n"
+                    f"All future match analyses will use this version.",
+                    parse_mode="Markdown"
+                )
             else:
                 await update.message.reply_text("⚠️ Couldn't read that PDF. Please try a text-based PDF.")
         except Exception as e:
