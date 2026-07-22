@@ -1369,8 +1369,20 @@ async def _run_resume_analysis(context, chat_id: int, url_hash: str, resume_text
         print(f"_run_resume_analysis: job lookup failed: {e}")
 
     try:
+        try:
+            student_res = supabase.table("students").select("*").eq("chat_id", chat_id).execute()
+            student_profile = student_res.data[0] if student_res.data else None
+        except Exception as profile_err:
+            print(f"Failed to fetch student profile for evaluation: {profile_err}")
+            student_profile = None
+
         evaluation_text = await asyncio.to_thread(
-            evaluate_resume_for_job, resume_text, job_title, job_company, job_description
+            evaluate_resume_for_job,
+            resume_text,
+            job_title,
+            job_company,
+            job_description,
+            student_profile=student_profile
         )
         admin_chat_id = os.getenv("ADMIN_CHAT_ID")
         if admin_chat_id:
@@ -1686,8 +1698,20 @@ async def handle_wizard_resume_pdf(update: Update, context: ContextTypes.DEFAULT
             print(f"Failed to save resume to students table: {save_err}")
 
         # 4. Generate Strict Evaluation using Gemini
+        try:
+            student_res = supabase.table("students").select("*").eq("chat_id", chat_id).execute()
+            student_profile = student_res.data[0] if student_res.data else None
+        except Exception as profile_err:
+            print(f"Failed to fetch student profile in wizard: {profile_err}")
+            student_profile = None
+
         evaluation_text = await asyncio.to_thread(
-            evaluate_resume_for_job, resume_text, job_title, job_company, job_description
+            evaluate_resume_for_job,
+            resume_text,
+            job_title,
+            job_company,
+            job_description,
+            student_profile=student_profile
         )
         
         # Save generated report directly to Supabase matching_queue

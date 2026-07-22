@@ -377,8 +377,63 @@ def compute_gap_analysis(resume_data: dict, jd_data: dict) -> dict:
         "education_level": resume_data.get("education_level") or "Unknown",
     }
 
+def extract_skills_from_jd_locally(job_title: str, job_description: str, student_skills: list = None) -> dict:
+    """Extracts required skills from JD locally using regex matching against common skills."""
+    desc_lower = (job_title + " " + (job_description or "")).lower()
+    
+    # 1. Candidate's skills
+    candidate_set = {str(s).lower().strip() for s in (student_skills or []) if s}
+    
+    # 2. Common tech skills from synonym map and predefined list
+    from matching import _SKILL_SYNONYMS, get_experience_tag, _SENIOR_TAGS
+    common_skills = set(_SKILL_SYNONYMS.keys()) | set(_SKILL_SYNONYMS.values())
+    common_skills.update([
+        "java", "python", "c", "cpp", "c++", "c#", "javascript", "typescript", "ruby", "golang", "go", "rust",
+        "sql", "mysql", "postgresql", "mongodb", "redis", "oracle", "sqlite",
+        "html", "css", "react", "angular", "vue", "next.js", "node.js", "django", "flask", "spring", "springboot",
+        "aws", "azure", "gcp", "docker", "kubernetes", "git", "ci/cd", "jenkins", "terraform",
+        "machine learning", "deep learning", "nlp", "computer vision", "statistics", "analytics",
+        "linux", "unix", "android", "ios", "swift", "kotlin", "excel", "powerbi", "tableau"
+    ])
+    
+    found_skills = set()
+    for skill in common_skills:
+        skill_clean = skill.strip().lower()
+        if not skill_clean:
+            continue
+        if re.search(r"\b" + re.escape(skill_clean) + r"\b", desc_lower):
+            canonical = _SKILL_SYNONYMS.get(skill_clean, skill_clean)
+            found_skills.add(canonical)
+            
+    for skill in candidate_set:
+        if re.search(r"\b" + re.escape(skill) + r"\b", desc_lower):
+            canonical = _SKILL_SYNONYMS.get(skill, skill)
+            found_skills.add(canonical)
+            
+    tag = get_experience_tag(job_title, job_description)
+    min_exp = 0
+    if "Mid-level" in tag:
+        min_exp = 2
+    elif "Senior" in tag:
+        min_exp = 5
+    elif "Staff" in tag:
+        min_exp = 8
+        
+    return {
+        "required_skills": sorted(list(found_skills)),
+        "preferred_skills": [],
+        "min_experience_years": min_exp
+    }
 
-def evaluate_resume_for_job(resume_text: str, job_title: str, company: str, job_description: str, profile_skills: list = None) -> str:
+
+def evaluate_resume_for_job(
+    resume_text: str,
+    job_title: str,
+    company: str,
+    job_description: str,
+    profile_skills: list = None,
+    student_profile: dict = None,
+) -> str:
     """Evaluates candidate resume using 4-signal gap analysis + LLM recruiter advice."""
     # 1. Structured parse of the candidate resume
     resume_data = parse_skills_from_resume(resume_text)
@@ -393,18 +448,33 @@ def evaluate_resume_for_job(resume_text: str, job_title: str, company: str, job_
 
     # 2. Structured parse of the JD
     from jd_skill_extractor import extract_skills_from_jd
-    jd_data = extract_skills_from_jd(job_title, company, job_description)
-    if not jd_data:
-        jd_data = {"required_skills": [], "preferred_skills": []}
-    jd_data["job_title"] = job_title  # passed into edu fit check
+    try:
+        jd_data = extract_skills_from_jd(job_title, company, job_description)
+    except Exception as jd_err:
+        print(f"Gemini JD skill extraction failed: {jd_err}")
+        jd_data = None
 
-    # Check for empty extracted required skills (due to API rate limit/error)
-    if not jd_data.get("required_skills"):
+    used_local_jd_extractor = False
+    if not jd_data or not jd_data.get("required_skills"):
+        jd_data = extract_skills_from_jd_locally(job_title, job_description, resume_data.get("skills", []))
+        used_local_jd_extractor = True
+    jd_data["job_title"] = job_title
+
+    # ── Eligibility Check ──
+    from matching import check_eligibility
+    is_eligible, ineligibility_reason = check_eligibility(
+        student_profile,
+        job_title,
+        company,
+        job_description,
+        category=jd_data.get("category"),
+        min_years_experience=jd_data.get("min_experience_years")
+    )
+    if not is_eligible:
         report = (
-            f"💪 *Strengths*\n⚠️ Analysis limited (API rate-limited)\n\n"
-            f"⚠️ *Needs Improvement*\n⚠️ Analysis limited (API rate-limited)\n\n"
-            f"🎯 *Recommendation*\nReview Manually 🔍\n\n"
-            f"🧠 *Recruiter take:*\nWe temporarily couldn't extract the precise technical requirements for this job due to Gemini API rate limits. Please review the job description manually to see if your background matches!"
+            f"🎯 *Recommendation*\nSkip / Ineligible ❌\n\n"
+            f"🚫 *Eligibility Issue:*\n{ineligibility_reason}\n\n"
+            f"🧠 *Recruiter take:*\nThis role is not suitable for your profile because it does not match your branch/academic background or experience level. Focus on applying to roles that match your background."
         )
         return report
 
@@ -416,7 +486,7 @@ def evaluate_resume_for_job(resume_text: str, job_title: str, company: str, job_
     proj_overlap = gaps["project_overlap"]
     exp_gap      = gaps["experience_gap_years"]
 
-    # 4. LLM recruiter advice — specific, named skills only
+    # 4. LLM recruiter advice — try Gemini if available, fallback to local template if rate-limited/offline
     advice_prompt = f"""A student is deciding whether and how to apply for {job_title} at {company}.
 
 Verified gap data (do not invent any skill not listed here):
@@ -432,11 +502,21 @@ Write exactly 2 sentences of recruiter-grade advice:
 - If there is an experience gap, mention one concrete workaround (e.g. open-source contribution, personal project using that stack).
 - No generic phrases ("upskill yourself", "you can do it"). Be direct and actionable."""
 
-    advice = "Focus on adding a project that demonstrates the missing required skills."
+    gemini_succeeded = False
+    advice = ""
     try:
         advice = execute_gemini_with_retry(advice_prompt)
+        gemini_succeeded = True
     except Exception as e:
-        print(f"Error generating advice: {e}")
+        print(f"Gemini advice generation failed: {e}")
+
+    if not gemini_succeeded:
+        # Local Report Recruiter Take fallback
+        advice = f"Focus on highlighting your matching skills: {', '.join(matched_req[:3]).upper()}."
+        if missing_req:
+            advice += f" To close the gap, add a personal project demonstrating {', '.join(missing_req[:3]).upper()}."
+        if exp_gap:
+            advice += f" Workaround the {exp_gap} yr experience gap by contributing to open-source or building specialized end-to-end applications."
 
     # 5. Format strengths and needs improvement
     strengths_list = []
@@ -491,5 +571,7 @@ Write exactly 2 sentences of recruiter-grade advice:
         f"🎯 *Recommendation*\n{recommendation}\n\n"
         f"🧠 *Recruiter take:*\n{advice}"
     )
+    if used_local_jd_extractor or not gemini_succeeded:
+        report += "\n\n_(Note: Local fallback matching used; Gemini was offline/rate-limited)_"
+        
     return report
-

@@ -523,6 +523,108 @@ def is_non_tech(title: str) -> bool:
     return any(k in title_lower for k in non_tech_keywords)
 
 
+def check_eligibility(
+    student: dict,
+    job_title: str,
+    company: str,
+    description: str,
+    category: str = None,
+    min_years_experience: int = None,
+) -> tuple[bool, str]:
+    """
+    Checks if a student is eligible for a given job.
+    Returns:
+        (is_eligible, ineligibility_reason)
+    """
+    if not student:
+        return True, ""
+
+    title_lower = job_title.lower()
+    desc_lower = (description or "").lower()
+    
+    # Clean department
+    dept = (student.get("department") or "cse").lower().strip()
+    
+    # Graduation year
+    current_year = datetime.now().year
+    grad_year = student.get("graduation_year") or current_year
+    
+    # Skills normalisation
+    student_skills = [str(s).lower().strip() for s in (student.get("skills") or [])]
+    
+    # ── 1. DCEO / Mechanical / Electrical / Facilities vs CS student ──
+    is_dceo_or_ops = (
+        "dceo" in title_lower or 
+        "data center engineering operations" in title_lower or
+        "hvac" in title_lower or 
+        "facilities engineer" in title_lower or
+        "mechanical engineer" in title_lower or 
+        "electrical engineer" in title_lower or
+        "power engineer" in title_lower or 
+        "cooling" in title_lower or 
+        "generator" in title_lower or
+        "chiller" in title_lower or 
+        "civil engineer" in title_lower or
+        "logistics specialist" in title_lower or
+        "high voltage" in title_lower or
+        "datacenter technician" in title_lower or
+        "critical facilities" in title_lower
+    )
+    
+    is_cs_student = any(kw in dept for kw in ["cse", "it", "cs", "computer science", "data science", "ds", "software"])
+    
+    if is_dceo_or_ops and is_cs_student:
+        return False, "This is an electrical/mechanical/facilities engineering role (DCEO/HVAC/Logistics), which does not align with your Computer Science / IT background."
+
+    # ── 2. Hardware/VLSI vs CS Student fit ──
+    is_hardware_job = (
+        category == "hardware" or
+        any(kw in title_lower for kw in ["vlsi", "asic", "rtl", "silicon", "analog design", "physical design", "fpga", "chip design"]) or
+        any(kw in desc_lower[:1000] for kw in ["verilog", "systemverilog", "vhdl", "rtl design", "synthesis", "semiconductor"])
+    )
+    
+    is_hardware_student = (
+        any(kw in dept for kw in ["ece", "ee", "electronics", "electrical", "instrumentation"]) or
+        any(any(kw in sk for kw in ["vlsi", "synthesis", "physical design", "verilog", "embedded"]) for sk in student_skills)
+    )
+    
+    if is_hardware_job and not is_hardware_student:
+        return False, "This is a hardware engineering role (VLSI/Silicon/ASIC), which requires an Electronics/Electrical background, but your profile is Computer Science/IT."
+
+    # ── 3. Internship vs Graduated student ──
+    is_intern = any(k in title_lower for k in ["intern", "internship", "trainee"])
+    if is_intern and grad_year < current_year:
+        return False, f"This is an internship role that requires candidates to be currently enrolled in college, but your profile indicates you graduated in {grad_year}."
+
+    # ── 4. Senior/Mid-level vs Fresher ──
+    min_exp = min_years_experience
+    if min_exp is None:
+        tag = get_experience_tag(job_title, description)
+        if tag in _SENIOR_TAGS:
+            if "Mid-level" in tag:
+                min_exp = 2
+            elif "Senior" in tag:
+                min_exp = 5
+            elif "Staff" in tag:
+                min_exp = 8
+            else:
+                min_exp = 3
+
+    if min_exp and min_exp >= 2:
+        student_exp = student.get("years_of_experience")
+        if student_exp is None:
+            student_exp = max(0, current_year - grad_year)
+            
+        if student_exp < min_exp and grad_year >= current_year:
+            return False, f"This role requires a minimum of {min_exp} years of professional experience, but you are a fresh graduate / student graduating in {grad_year}."
+
+    # ── 5. Non-tech job fit for tech student ──
+    if is_non_tech(job_title) and is_cs_student:
+        return False, "This is a non-technical role (Sales/Operations/Recruiting), which does not align with your technical Software Engineering goals."
+
+    return True, ""
+
+
 # ── Scoring weights (all 4 signals, must sum to 1.0) ─────────────────────────
 # Tune via env vars without redeployment.
 _W_SEMANTIC  = float(os.getenv("SCORE_W_SEMANTIC",  "0.45"))  # skills embedding (title + JD)
@@ -934,6 +1036,22 @@ def match_jobs_for_student(
     grad_year = student.get("graduation_year", current_year)
     student_years = student.get("years_of_experience")  # None if not set (older profiles)
     jobs = _filter_fresher_jobs(jobs, grad_year, current_year, student_years=student_years)
+    
+    # Filter out ineligible jobs (DCEO, mechanical/electrical, wrong graduation year, etc.)
+    eligible_jobs = []
+    for j in jobs:
+        is_eligible, _ = check_eligibility(
+            student,
+            j["title"],
+            j.get("company", ""),
+            j.get("description") or "",
+            category=j.get("category"),
+            min_years_experience=j.get("min_years_experience")
+        )
+        if is_eligible:
+            eligible_jobs.append(j)
+    jobs = eligible_jobs
+
     if not jobs:
         return []
 
