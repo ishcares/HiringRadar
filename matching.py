@@ -1025,7 +1025,20 @@ def match_jobs_for_student(
                 filtered_by_loc.append(j)
         jobs = filtered_by_loc
 
-    jobs = filter_by_job_type(jobs, student.get("job_type", "both"))
+    # ── Graduation-year-aware job type filtering ──────────────────────────────
+    # If a student is still in college (grad_year > current_year), default their
+    # effective job type to "internship" — unless they explicitly chose "fulltime".
+    # A 2027 grad should NOT receive Amazon SDE full-time alerts by default.
+    # They can override this by running /experience fulltime.
+    current_year = datetime.now().year
+    grad_year = student.get("graduation_year", current_year)
+    explicit_job_type = student.get("job_type") or "both"
+    if grad_year > current_year and explicit_job_type != "fulltime":
+        effective_job_type = "internship"
+    else:
+        effective_job_type = explicit_job_type
+
+    jobs = filter_by_job_type(jobs, effective_job_type)
     roles = student.get("preferred_roles") or []
 
     # NOTE: we no longer hard-filter jobs by matches_role() here. Doing so
@@ -1037,8 +1050,6 @@ def match_jobs_for_student(
     if not jobs:
         return []
 
-    current_year = datetime.now().year
-    grad_year = student.get("graduation_year", current_year)
     student_years = student.get("years_of_experience")  # None if not set (older profiles)
     jobs = _filter_fresher_jobs(jobs, grad_year, current_year, student_years=student_years)
     
