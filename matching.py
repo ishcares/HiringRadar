@@ -294,8 +294,13 @@ def get_experience_tag(title: str, description: str = "") -> str:
     ):
         return "🚀 Senior (5+ yrs)"
 
+    # Standalone MTS = Salesforce Member of Technical Staff (≈SDE-2, 3+ yrs)
+    # Must be checked BEFORE the generic mid-level pattern to avoid partial-match confusion.
+    if re.search(r"\bmts\b", t):
+        return "💼 Mid-level (2-5 yrs)"
+
     if (
-        re.search(r"\b(?:sde|swe|software\s+(?:development\s+)?engineer|engineer|developer|qa|analyst|specialist|mts)[\s-]*(?:ii|2)\b", t)
+        re.search(r"\b(?:sde|swe|software\s+(?:development\s+)?engineer|engineer|developer|qa|analyst|specialist)[\s-]*(?:ii|2)\b", t)
         or re.search(r"\b(mid-level|mid level|experienced)\b", t)
     ):
         return "💼 Mid-level (2-5 yrs)"
