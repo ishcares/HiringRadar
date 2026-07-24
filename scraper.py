@@ -852,48 +852,58 @@ def get_all_jobs():
 
     # ── Greenhouse ────────────────────────────────────────────────────────────
     for name, token in [
-        # Core Indian tech companies
-        ("Razorpay",   "razorpaysoftwareprivatelimited"),
-        ("PhonePe",    "phonepe"),
-        ("Groww",      "groww"),
-        ("Postman",    "postman"),
-        ("Coinbase",   "coinbase"),
-        ("Rubrik",     "rubrik"),
-        ("Tekion",     "tekion"),
-        ("InMobi",     "inmobi"),
-        ("DeepMind",   "deepmind"),
-        ("Glean",      "gleanwork"),
-        ("Stripe",     "stripe"),
-        ("Samsara",    "samsara"),
-        ("Mixpanel",   "mixpanel"),
-        ("Zscaler",    "zscaler"),
-        ("PagerDuty",  "pagerduty"),
-        ("YugabyteDB", "yugabyte"),
-        ("Vercel",     "vercel"),
-        ("Brex",       "brex"),
-        ("Figma",      "figma"),
-        ("Airtable",   "airtable"),
-        ("Airbnb",     "airbnb"),
-        ("Reddit",     "reddit"),
-        ("Databricks", "databricks"),
-        ("MongoDB",    "mongodb"),
-        ("Twilio",     "twilio"),
-        ("Elastic",    "elastic"),
-        ("Okta",       "okta"),
-        ("Affirm",     "affirm"),
-        ("Cloudflare", "cloudflare"),
-        ("Remote.com", "remote"),
-        # Finance / Quant
-        ("Jane Street", "janestreet"),   # confirmed OK
-        ("Slice",        "slice"),
-        # Indian product startups — VERIFIED Greenhouse tokens only.
-        # All 12 previously listed companies (Clevertap, Darwinbox, Lenskart,
-        # Dunzo, Nykaa, Swiggy, Ola, Vedantu, Unacademy, ShareChat, Innovaccer,
-        # Exotel) returned 404 — they do NOT use Greenhouse. Do not re-add them.
-        # Add new companies here ONLY after confirming with:
-        #   curl -s "https://boards-api.greenhouse.io/v1/boards/<TOKEN>/jobs"
-        # NOTE: Citadel/Bloomberg/Barclays also 404 on Greenhouse (proprietary ATS).
-        # NOTE: Google, Amazon, Apple use custom ATS portals.
+        # Core Indian tech / MNCs
+        ("Razorpay",      "razorpaysoftwareprivatelimited"),
+        ("PhonePe",       "phonepe"),
+        ("Groww",         "groww"),
+        ("Postman",       "postman"),
+        ("Coinbase",      "coinbase"),
+        ("Rubrik",        "rubrik"),
+        ("Tekion",        "tekion"),
+        ("InMobi",        "inmobi"),
+        ("DeepMind",      "deepmind"),
+        ("Glean",         "gleanwork"),
+        ("Stripe",        "stripe"),
+        ("Samsara",       "samsara"),
+        ("Mixpanel",      "mixpanel"),
+        ("Zscaler",       "zscaler"),
+        ("PagerDuty",     "pagerduty"),
+        ("YugabyteDB",    "yugabyte"),
+        ("Vercel",        "vercel"),
+        ("Brex",          "brex"),
+        ("Figma",         "figma"),
+        ("Airtable",      "airtable"),
+        ("Airbnb",        "airbnb"),
+        ("Reddit",        "reddit"),
+        ("Databricks",    "databricks"),
+        ("MongoDB",       "mongodb"),
+        ("Twilio",        "twilio"),
+        ("Elastic",       "elastic"),
+        ("Okta",          "okta"),
+        ("Affirm",        "affirm"),
+        ("Cloudflare",    "cloudflare"),
+        ("Remote.com",    "remote"),
+        ("Jane Street",   "janestreet"),
+        ("Slice",         "slice"),
+        ("Uber",          "uber"),
+        ("Atlassian",     "atlassian"),
+        # Indian startups & consumer brands (Greenhouse confirmed)
+        ("boAt Lifestyle","imaginemarketingboat"),
+        ("Urban Company", "urbanclap"),
+        ("Dunzo",         "dunzo"),
+        ("Rapido",        "rapido"),
+        ("BlackBuck",     "blackbuck"),
+        ("Mamaearth",     "honasconsumerlimited"),
+        ("Ola",           "olacabs"),
+        ("Lenskart",      "lenskart"),
+        ("Vedantu",       "vedantu"),
+        ("Unacademy",     "unacademy"),
+        ("ShareChat",     "sharechat"),
+        ("BharatPe",      "bharatpe"),
+        ("BrowserStack",  "browserstack"),
+        ("Hasura",        "hasura"),
+        ("Setu",          "setu"),
+        ("Hotstar",       "disneyhotstar"),
     ]:
         try:
             jobs = scrape_greenhouse_json(name, token)
@@ -915,19 +925,9 @@ def get_all_jobs():
         ("Mindtickle",    "mindtickle"),
         ("fi.money",      "epifi"),
         ("FamPay",        "fampay"),
-       
-        
         ("JumpCloud",     "jumpcloud"),
         ("Pocket FM",     "pocketfm"),
-        # Indian startups on Lever — slugs confirmed via lever.co/v0 API
-        # To verify: curl -s "https://api.lever.co/v0/postings/<SLUG>?mode=json"
-        # Do NOT add slugs here that return 404 or an empty list.
-        # Remote-first companies on Lever
-        
-        ("contentSquare",        "contentsquare"),
-        
-        
-        
+        ("contentSquare", "contentsquare"),
     ]:
         try:
             jobs = scrape_lever(name, slug)
@@ -940,24 +940,8 @@ def get_all_jobs():
     # ── Workday ───────────────────────────────────────────────────────────────
     for name, tenant, board, wd in [
         ("Salesforce",    "salesforce", "External_Career_Site",      12),
-        # ("Samsung",       "sec",        "samsungcareers",             3), # Failed: 404
-       
-        # Finance / Big Tech on Workday
         ("Nvidia",        "nvidia",     "NVIDIAExternalCareerSite",    5),
         ("Cohesity",      "cohesity",   "Cohesity_Careers",            5),
-        # The following returned 422/NameResolutionError on Workday. Commented out for verification.
-        # ("JPMorgan Chase","jpmc",       "JPMorganChase",               1),
-        # ("Goldman Sachs", "goldmansachs","gs_external_career_website",  1),
-        # ("Barclays",      "barclays",   "BarcExternal",                1),
-        # ("Morgan Stanley","morganstanley","ExternalJobOpenings",         1),
-        # ("Visa",          "visa",       "VisaJobsGlobal",              1), # Managed via SmartRecruiters instead
-        # ("American Express","aexp",     "AmexExternalReq",             1),
-        # ("Deutsche Bank", "db",         "DBWS_ExternalJobPostings",    5),
-        # ("Citi",          "citi",       "Citi",                        1),
-        # ("Wells Fargo",   "wellsfargo", "WellsFargoJobSearch",         1),
-        # ("BNY",           "bnymellon",  "BNYMellonCareers",            2),
-        # ("State Street",  "statestreet","StateStreetCareers",          2),
-        # ("Microsoft",     "microsoft",  "MicrosoftCareers",            1),
     ]:
         try:
             jobs = scrape_workday(name, tenant, board, wd)
@@ -969,14 +953,20 @@ def get_all_jobs():
 
     # ── Ashby ─────────────────────────────────────────────────────────────────
     for name, company_id in [
-        ("Superhuman",  "superhuman"),
-        ("PostHog",     "posthog"),
-        ("Notion",      "notion"),
+        ("Superhuman",    "superhuman"),
+        ("PostHog",       "posthog"),
+        ("Notion",        "notion"),
         ("Linear",        "linear"),
-        ("Maze",          "maze"),
-        # NOTE: Pika/Perplexity/Anduril removed — unconfirmed Ashby tokens
-        # and minimal India hiring. Add back only after verifying:
-        #   curl -s "https://api.ashbyhq.com/v1/iframe/web/jobs?jobBoardId=<TOKEN>"
+        ("Moengage",      "moengage"),
+        ("Chargebee",     "chargebee"),
+        ("Khatabook",     "khatabook"),
+        ("Exotel",        "exotel"),
+        ("Recko",         "recko"),
+        ("BetterPlace",   "betterplace"),
+        ("Vokal",         "vokal"),
+        ("Smallcase",     "smallcase"),
+        ("Jar",           "jar"),
+        ("Refyne",        "refyne"),
     ]:
         try:
             jobs = scrape_ashby(name, company_id)
@@ -986,48 +976,26 @@ def get_all_jobs():
             status_rows.append([name, "Ashby", "Failed", now_str, str(e)])
             print(f"Error scraping Ashby for {name}: {e}")
 
-    # ── SmartRecruiters ───────────────────────────────────────────────────────
-    # ALL company IDs below confirmed via verify_ats.py (200 OK response).
-    # To add more: python verify_ats.py and look for SmartRecruiters OK rows.
-    for name, company_id in [
-        ("Freshworks",   "Freshworks"),
-        ("BrowserStack", "BrowserStack"),
-        ("Chargebee",    "Chargebee"),
-        ("Zomato",       "Zomato1"),
-        ("Canva",        "canva"),
-        ("Agoda",        "Agoda"),
-        ("Whatfix",      "WhatfixInc"),
-        # Below verified OK via verify_ats.py live API check
-        ("Swiggy",       "Swiggy"),
-        ("Nykaa",        "Nykaa"),
-        ("Clevertap",    "Clevertap"),
-        ("Darwinbox",    "Darwinbox"),
-        ("ShareChat",    "Sharechat"),
-        ("Turing",       "Turing"),
-        ("Games24x7",    "Games24x7"),
-        ("Juspay",       "Juspay"),
-        ("Mastercard",   "Mastercard"),
-        ("Visa",         "Visa"),
-    ]:
-        try:
-            jobs = scrape_smartrecruiters(name, company_id)
-            all_jobs += jobs
-            status_rows.append([name, "SmartRecruiters", "Success", now_str, f"Found {len(jobs)} jobs"])
-        except Exception as e:
-            status_rows.append([name, "SmartRecruiters", "Failed", now_str, str(e)])
-            print(f"Error scraping SmartRecruiters for {name}: {e}")
-
     # ── Keka Hire ─────────────────────────────────────────────────────────────
     for name, tenant in [
-        ("Jupiter",    "jupiter"),
-        ("Chalo",      "chalo"),
-        ("Epigamia",   "epigamia"),
-        ("Toppr",      "toppr"),
-        ("mFine",      "mfine"),
-        ("Park+",      "parkplus"),
-        ("Loco",       "loco"),
-        ("Zupay",      "zupay"),
-        ("Obvious",   "obvious"),
+        ("Jupiter",        "jupiter"),
+        ("Chalo",          "chalo"),
+        ("Epigamia",       "epigamia"),
+        ("Toppr",          "toppr"),
+        ("mFine",          "mfine"),
+        ("Park+",          "parkplus"),
+        ("Loco",           "loco"),
+        ("Zupay",          "zupay"),
+        ("Obvious",        "obvious"),
+        ("Jar App",        "jarapp"),
+        ("Spotdraft",      "spotdraft"),
+        ("Progcap",        "progcap"),
+        ("Volopay",        "volopay"),
+        ("Mindtickle",     "mindtickle"),
+        ("Scaler",         "scaler"),
+        ("Newton School",  "newtonschool"),
+        ("Teachmint",      "teachmint"),
+        ("Airmeet",        "airmeet"),
     ]:
         try:
             jobs = scrape_keka(name, tenant)
@@ -1039,7 +1007,12 @@ def get_all_jobs():
 
     # ── iCIMS ─────────────────────────────────────────────────────────────────
     for name, token in [
-        ("GitHub", "careers-githubinc"),
+        ("GitHub",       "careers-githubinc"),
+        ("Synchrony",    "careers-synchronyfinancial"),
+        ("NCR Voyix",    "careers-ncrvoyix"),
+        ("Conduent",     "careers-conduent"),
+        ("Sabre",        "careers-sabre"),
+        ("Unison",       "careers-unisonpoint"),
     ]:
         try:
             jobs = scrape_icims(name, token)
@@ -1067,136 +1040,6 @@ def get_all_jobs():
         status_rows.append(["Amazon (Intern)", "Custom JSON API", "Failed", now_str, str(e)])
         print(f"Error scraping Amazon interns: {e}")
 
-    # ── Intern / Early Career — Greenhouse ────────────────────────────────────
-    # These are companies with known India intern / new-grad programs on Greenhouse
-    for name, token in [
-        ("Meesho",        "meesho"),
-        ("Salesforce",    "salesforce"),
-        ("Uber",          "uber"),
-        ("LinkedIn",      "linkedin"),
-        ("Atlassian",     "atlassian"),
-        ("Freshworks",    "freshworks"),
-        ("Gojek",         "gofrontend"),
-        ("OLX India",     "olx"),
-        ("Hotstar",       "disneyhoststar"),
-        ("Sharechat",     "sharechat"),
-        ("Dream11",       "dream11"),
-        ("Unacademy",     "unacademy"),
-        ("BrowserStack", "browserstack"),
-        ("Hasura",        "hasura"),
-        ("Setu",          "setu"),
-    ]:
-        try:
-            jobs = scrape_greenhouse_json(name, token)
-            all_jobs += jobs
-            status_rows.append([name, "Greenhouse (Intern/EC)", "Success", now_str, f"Found {len(jobs)} jobs"])
-        except Exception as e:
-            status_rows.append([name, "Greenhouse (Intern/EC)", "Failed", now_str, str(e)])
-            print(f"Error scraping Greenhouse intern for {name}: {e}")
-
-    # ── Intern / Early Career — Lever ─────────────────────────────────────────
-    for name, token in [
-        ("Flipkart",     "flipkart"),
-        ("Cred",         "cred"),
-        ("BharatPe",     "bharatpe"),
-        ("Slice",        "sliceit"),
-        ("Ola",          "ola"),
-        ("Zepto",        "zepto"),
-        ("Porter",       "porter"),
-        ("Lenskart",     "lenskart"),
-        ("Spinny",       "spinny"),
-        ("Vedantu",      "vedantu"),
-    ]:
-        try:
-            jobs = scrape_lever(name, token)
-            all_jobs += jobs
-            status_rows.append([name, "Lever (Intern/EC)", "Success", now_str, f"Found {len(jobs)} jobs"])
-        except Exception as e:
-            status_rows.append([name, "Lever (Intern/EC)", "Failed", now_str, str(e)])
-            print(f"Error scraping Lever intern for {name}: {e}")
-
-    # ── Intern / Early Career — Ashby ─────────────────────────────────────────
-    # Ashby is popular with India-based SaaS / fintech startups
-    for name, token in [
-        ("Moengage",      "moengage"),
-        ("Chargebee",     "chargebee"),
-        ("Khatabook",     "khatabook"),
-        ("Exotel",        "exotel"),
-        ("Recko",         "recko"),
-        ("BetterPlace",   "betterplace"),
-        ("Vokal",         "vokal"),
-        ("Smallcase",     "smallcase"),
-        ("Jar",           "jar"),
-        ("Refyne",        "refyne"),
-    ]:
-        try:
-            jobs = scrape_ashby(name, token)
-            all_jobs += jobs
-            status_rows.append([name, "Ashby (Intern/EC)", "Success", now_str, f"Found {len(jobs)} jobs"])
-        except Exception as e:
-            status_rows.append([name, "Ashby (Intern/EC)", "Failed", now_str, str(e)])
-            print(f"Error scraping Ashby intern for {name}: {e}")
-
-    # ── Intern / Early Career — Keka Hire ─────────────────────────────────────
-    # Indian product startups using Keka (popular India-first ATS)
-    for name, tenant in [
-        ("Jar App",        "jarapp"),
-        ("Spotdraft",      "spotdraft"),
-        ("Progcap",        "progcap"),
-        ("Volopay",        "volopay"),
-        ("Mindtickle",     "mindtickle"),
-        ("Scaler",         "scaler"),
-        ("Newton School",  "newtonschool"),
-        ("Teachmint",      "teachmint"),
-        ("Airmeet",        "airmeet"),
-    ]:
-        try:
-            jobs = scrape_keka(name, tenant)
-            all_jobs += jobs
-            status_rows.append([name, "Keka (Intern/EC)", "Success", now_str, f"Found {len(jobs)} jobs"])
-        except Exception as e:
-            status_rows.append([name, "Keka (Intern/EC)", "Failed", now_str, str(e)])
-            print(f"Error scraping Keka intern for {name}: {e}")
-
-    # ── Intern / Early Career — iCIMS ─────────────────────────────────────────
-    # Large MNCs with India engineering offices using iCIMS
-    for name, token in [
-        ("Synchrony",    "careers-synchronyfinancial"),
-        ("NCR Voyix",    "careers-ncrvoyix"),
-        ("Conduent",     "careers-conduent"),
-        ("Sabre",        "careers-sabre"),
-        ("Unison",       "careers-unisonpoint"),
-    ]:
-        try:
-            jobs = scrape_icims(name, token)
-            all_jobs += jobs
-            status_rows.append([name, "iCIMS (Intern/EC)", "Success", now_str, f"Found {len(jobs)} jobs"])
-        except Exception as e:
-            status_rows.append([name, "iCIMS (Intern/EC)", "Failed", now_str, str(e)])
-            print(f"Error scraping iCIMS intern for {name}: {e}")
-
-    # ── Intern / Early Career — SmartRecruiters ───────────────────────────────
-    # Additional Indian consumer tech companies on SmartRecruiters
-    for name, company_id in [
-        ("Razorpay",      "Razorpay"),
-        ("Paytm",         "Paytm"),
-        ("PhonePe",       "PhonePe"),
-        ("InMobi",        "InMobi"),
-        ("boAt Lifestyle","boatlifestyle"),
-        ("Mamaearth",     "Mamaearth"),
-        ("Urban Company", "UrbanCompany"),
-        ("Dunzo",         "Dunzo"),
-        ("Rapido",        "Rapido"),
-        ("BlackBuck",     "BlackBuck"),
-    ]:
-        try:
-            jobs = scrape_smartrecruiters(name, company_id)
-            all_jobs += jobs
-            status_rows.append([name, "SmartRecruiters (Intern/EC)", "Success", now_str, f"Found {len(jobs)} jobs"])
-        except Exception as e:
-            status_rows.append([name, "SmartRecruiters (Intern/EC)", "Failed", now_str, str(e)])
-            print(f"Error scraping SmartRecruiters intern for {name}: {e}")
-
     # Write status health report to CSV sheet
     try:
         status_file = "company_status.csv"
@@ -1207,7 +1050,16 @@ def get_all_jobs():
     except PermissionError:
         print("Warning: company_status.csv is locked. Skipping status write.")
 
-    return all_jobs
+    # ── Deduplicate all scraped jobs by URL ───────────────────────────────────
+    # Prevents "ON CONFLICT DO UPDATE command cannot affect row a second time"
+    seen_urls = set()
+    deduped_jobs = []
+    for j in all_jobs:
+        if j["url"] not in seen_urls:
+            seen_urls.add(j["url"])
+            deduped_jobs.append(j)
+
+    return deduped_jobs
 
 
 
