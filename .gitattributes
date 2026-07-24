@@ -1,0 +1,12 @@
+# Normalize line endings
+* text=auto eol=lf
+
+# Force scripts to keep LF (Unix format) for execution safety
+*.sh text eol=lf
+*.py text eol=lf
+
+# Exclude generated/data files from language stats
+scraped_jobs.csv linguist-documentation
+seen_jobs.json linguist-documentation
+seen_tracked_jobs.json linguist-documentation
+*.png binary

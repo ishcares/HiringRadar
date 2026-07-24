@@ -1,6 +1,13 @@
-# HiringRadar 🎯
+<p align="center">
+  <img src="logo.png" width="160" alt="HiringRadar Logo">
+</p>
 
-🤖 **Live Demo:** [Try the Telegram Bot](https://t.me/Hiringradar_bot)
+<h1 align="center">HiringRadar 🎯</h1>
+
+<p align="center">
+  🤖 <b>Live Demo:</b> <a href="https://t.me/Hiringradar_bot">Try the Telegram Bot</a>
+</p>
+
 
 HiringRadar is an automated, real-time job matching and alert system built for college students and freshers. It scrapes job boards from **60+ top-tier product companies and startups**, parses qualifications, runs local **semantic vector embeddings matching** against candidate resumes, and delivers high-relevance alerts instantly via Telegram.
 
