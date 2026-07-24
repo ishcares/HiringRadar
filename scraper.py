@@ -765,6 +765,84 @@ def scrape_amazon(max_results: int = 300) -> list[dict]:
     return relevant
 
 
+def scrape_amazon_interns(max_results: int = 100) -> list[dict]:
+    """
+    Same as scrape_amazon() but filters to internship job type only.
+    Uses Amazon's search API with job_type[]=Intern filter.
+    """
+    base_url = "https://amazon.jobs/en/search.json"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "application/json, */*",
+        "Referer": "https://amazon.jobs/en/search",
+    }
+    relevant = []
+    offset = 0
+    page_size = 100
+
+    while len(relevant) < max_results:
+        params = {
+            "normalized_country_code[]": "IND",
+            "job_type[]": "Intern",
+            "result_limit": page_size,
+            "offset": offset,
+        }
+        try:
+            resp = requests.get(base_url, params=params, headers=headers, timeout=15)
+        except Exception as e:
+            print(f"Amazon intern fetch error at offset {offset}: {e}")
+            break
+
+        if resp.status_code != 200:
+            break
+
+        try:
+            data = resp.json()
+        except Exception:
+            break
+
+        jobs = data.get("jobs", [])
+        if not jobs:
+            break
+
+        for job in jobs:
+            title = job.get("title", "")
+            # Don't filter by relevance keywords for intern roles — accept all tech interns
+            category = check_job_relevance_and_category(title) or "tech"
+
+            city    = job.get("city", "")
+            country = job.get("country_code", "")
+            location = f"{city}, {country}".strip(", ") or "India"
+            if not is_india_location(location):
+                continue
+
+            job_id  = job.get("id_icims") or job.get("job_id", "")
+            job_url = f"https://amazon.jobs/en/jobs/{job_id}" if job_id else ""
+
+            import re as _re
+            raw_desc = job.get("description", "") or ""
+            description = _re.sub(r"<[^>]+>", " ", raw_desc).strip()
+
+            if is_program_restricted(title, description):
+                continue
+
+            relevant.append({
+                "company":      "Amazon",
+                "title":        title,
+                "location":     location,
+                "url":          job_url,
+                "category":     category,
+                "description":  description,
+                "remote_class": get_remote_class(location),
+            })
+
+        if len(jobs) < page_size:
+            break
+        offset += page_size
+
+    return relevant
+
+
 def get_all_jobs():
     all_jobs = []
     status_rows = []
@@ -971,10 +1049,7 @@ def get_all_jobs():
             status_rows.append([name, "iCIMS", "Failed", now_str, str(e)])
             print(f"Error scraping iCIMS for {name}: {e}")
 
-    # ── Amazon Jobs (custom JSON API) ─────────────────────────────────────────
-    # amazon.jobs/en/search.json is the internal REST endpoint their SPA uses.
-    # No auth, no browser required. Paginates up to 300 India-based results.
-    # Google and Apple are JS-rendered SPAs — require Playwright (not added yet).
+    # ── Amazon Jobs — Full-time (India) ──────────────────────────────────────
     try:
         amazon_jobs = scrape_amazon(max_results=300)
         all_jobs += amazon_jobs
@@ -982,6 +1057,63 @@ def get_all_jobs():
     except Exception as e:
         status_rows.append(["Amazon", "Custom JSON API", "Failed", now_str, str(e)])
         print(f"Error scraping Amazon: {e}")
+
+    # ── Amazon Jobs — Internships (India) ─────────────────────────────────────
+    try:
+        amazon_intern_jobs = scrape_amazon_interns(max_results=100)
+        all_jobs += amazon_intern_jobs
+        status_rows.append(["Amazon (Intern)", "Custom JSON API", "Success", now_str, f"Found {len(amazon_intern_jobs)} intern jobs"])
+    except Exception as e:
+        status_rows.append(["Amazon (Intern)", "Custom JSON API", "Failed", now_str, str(e)])
+        print(f"Error scraping Amazon interns: {e}")
+
+    # ── Intern / Early Career — Greenhouse ────────────────────────────────────
+    # These are companies with known India intern / new-grad programs on Greenhouse
+    for name, token in [
+        ("Meesho",        "meesho"),
+        ("Salesforce",    "salesforce"),
+        ("Uber",          "uber"),
+        ("LinkedIn",      "linkedin"),
+        ("Atlassian",     "atlassian"),
+        ("Freshworks",    "freshworks"),
+        ("Gojek",         "gofrontend"),
+        ("OLX India",     "olx"),
+        ("Hotstar",       "disneyhoststar"),
+        ("Sharechat",     "sharechat"),
+        ("Dream11",       "dream11"),
+        ("Unacademy",     "unacademy"),
+        ("BrowserStack", "browserstack"),
+        ("Hasura",        "hasura"),
+        ("Setu",          "setu"),
+    ]:
+        try:
+            jobs = scrape_greenhouse_json(name, token)
+            all_jobs += jobs
+            status_rows.append([name, "Greenhouse (Intern/EC)", "Success", now_str, f"Found {len(jobs)} jobs"])
+        except Exception as e:
+            status_rows.append([name, "Greenhouse (Intern/EC)", "Failed", now_str, str(e)])
+            print(f"Error scraping Greenhouse intern for {name}: {e}")
+
+    # ── Intern / Early Career — Lever ─────────────────────────────────────────
+    for name, token in [
+        ("Flipkart",     "flipkart"),
+        ("Cred",         "cred"),
+        ("BharatPe",     "bharatpe"),
+        ("Slice",        "sliceit"),
+        ("Ola",          "ola"),
+        ("Zepto",        "zepto"),
+        ("Porter",       "porter"),
+        ("Lenskart",     "lenskart"),
+        ("Spinny",       "spinny"),
+        ("Vedantu",      "vedantu"),
+    ]:
+        try:
+            jobs = scrape_lever(name, token)
+            all_jobs += jobs
+            status_rows.append([name, "Lever (Intern/EC)", "Success", now_str, f"Found {len(jobs)} jobs"])
+        except Exception as e:
+            status_rows.append([name, "Lever (Intern/EC)", "Failed", now_str, str(e)])
+            print(f"Error scraping Lever intern for {name}: {e}")
 
     # Write status health report to CSV sheet
     try:
