@@ -25,6 +25,8 @@ scraped_jobs.csv
 scratch/
 temp*/
 *.log
+migrations/
+scripts/
 
 # IDE & Editor files
 .vscode/
