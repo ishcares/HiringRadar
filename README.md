@@ -21,7 +21,7 @@ HiringRadar is an automated, real-time job matching and alert system built for c
 
 HiringRadar is configured and optimized to fetch, parse, and match listings from target high-growth technology companies and financial institutions:
 
-*   **Tech Giants & Core Product:** Google, Microsoft, Amazon, Stripe, Rubrik, Visa, Mastercard
+*   **Big Tech & Core Product:** Amazon, Stripe, Rubrik, Visa, Mastercard
 *   **Finance & Investment Banking:** JPMorgan Chase, Goldman Sachs, Morgan Stanley, Barclays, American Express, Deutsche Bank
 *   **High-Growth Startups:** Razorpay, PhonePe, CRED, Groww, Paytm, Meesho, and more.
 
@@ -31,7 +31,7 @@ HiringRadar is configured and optimized to fetch, parse, and match listings from
 
 HiringRadar's matching engine aligns candidate profiles to the distinct hiring criteria of our target company segments:
 
-### 1. FAANG & Big Tech (Amazon, Google, Microsoft)
+### 1. FAANG & Big Tech (Amazon)
 *   **The Bar:** Deep focus on Data Structures & Algorithms (DSA), system design foundation, and horizontal scaling.
 *   **HiringRadar Alignment:** Flags target graduation batch years (e.g., *2027 grads*), matches on core programming paradigms (Python, C++, Java), and flags containerization and cloud scaling experience (AWS, Docker, Kubernetes).
 
@@ -42,6 +42,7 @@ HiringRadar's matching engine aligns candidate profiles to the distinct hiring c
 ### 3. Scaled Enterprise Product (Rubrik, Visa, Mastercard)
 *   **The Bar:** Data resiliency, caching layer optimization, storage operations, and cloud resource management.
 *   **HiringRadar Alignment:** Ranks candidates on storage systems, caching layers (Redis), container orchestration, and CI/CD pipelines.
+
 
 ---
 
