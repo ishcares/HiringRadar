@@ -618,10 +618,11 @@ def check_eligibility(
     if min_exp and min_exp >= 2:
         student_exp = student.get("years_of_experience")
         if student_exp is None:
+            # Infer from graduation year (0 if still in college, positive if graduated)
             student_exp = max(0, current_year - grad_year)
-            
-        if student_exp < min_exp and grad_year >= current_year:
-            return False, f"This role requires a minimum of {min_exp} years of professional experience, but you are a fresh graduate / student graduating in {grad_year}."
+
+        if student_exp < min_exp:
+            return False, f"This role requires a minimum of {min_exp} years of professional experience. Your profile shows approximately {student_exp} year(s) of experience, which does not meet this requirement."
 
     # ── 5. Non-tech job fit for tech student ──
     if is_non_tech(job_title) and is_cs_student:
