@@ -289,6 +289,8 @@ def upsert_jobs_cache(jobs: list[dict]) -> int:
     """
     if not jobs:
         return 0
+    from datetime import datetime, timezone
+    now_iso = datetime.now(timezone.utc).isoformat()
     rows = [
         {
             "id":         _job_id(job),
@@ -300,6 +302,7 @@ def upsert_jobs_cache(jobs: list[dict]) -> int:
             "category":   job.get("category", "tech"),
             "is_active":  True,
             "remote_class": job.get("remote_class", "india"),
+            "scraped_at": now_iso,
         }
         for job in jobs
     ]
