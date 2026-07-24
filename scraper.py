@@ -1115,6 +1115,88 @@ def get_all_jobs():
             status_rows.append([name, "Lever (Intern/EC)", "Failed", now_str, str(e)])
             print(f"Error scraping Lever intern for {name}: {e}")
 
+    # ── Intern / Early Career — Ashby ─────────────────────────────────────────
+    # Ashby is popular with India-based SaaS / fintech startups
+    for name, token in [
+        ("Moengage",      "moengage"),
+        ("Chargebee",     "chargebee"),
+        ("Khatabook",     "khatabook"),
+        ("Exotel",        "exotel"),
+        ("Recko",         "recko"),
+        ("BetterPlace",   "betterplace"),
+        ("Vokal",         "vokal"),
+        ("Smallcase",     "smallcase"),
+        ("Jar",           "jar"),
+        ("Refyne",        "refyne"),
+    ]:
+        try:
+            jobs = scrape_ashby(name, token)
+            all_jobs += jobs
+            status_rows.append([name, "Ashby (Intern/EC)", "Success", now_str, f"Found {len(jobs)} jobs"])
+        except Exception as e:
+            status_rows.append([name, "Ashby (Intern/EC)", "Failed", now_str, str(e)])
+            print(f"Error scraping Ashby intern for {name}: {e}")
+
+    # ── Intern / Early Career — Keka Hire ─────────────────────────────────────
+    # Indian product startups using Keka (popular India-first ATS)
+    for name, tenant in [
+        ("Jar App",        "jarapp"),
+        ("Spotdraft",      "spotdraft"),
+        ("Progcap",        "progcap"),
+        ("Volopay",        "volopay"),
+        ("Mindtickle",     "mindtickle"),
+        ("Scaler",         "scaler"),
+        ("Newton School",  "newtonschool"),
+        ("Teachmint",      "teachmint"),
+        ("Airmeet",        "airmeet"),
+    ]:
+        try:
+            jobs = scrape_keka(name, tenant)
+            all_jobs += jobs
+            status_rows.append([name, "Keka (Intern/EC)", "Success", now_str, f"Found {len(jobs)} jobs"])
+        except Exception as e:
+            status_rows.append([name, "Keka (Intern/EC)", "Failed", now_str, str(e)])
+            print(f"Error scraping Keka intern for {name}: {e}")
+
+    # ── Intern / Early Career — iCIMS ─────────────────────────────────────────
+    # Large MNCs with India engineering offices using iCIMS
+    for name, token in [
+        ("Synchrony",    "careers-synchronyfinancial"),
+        ("NCR Voyix",    "careers-ncrvoyix"),
+        ("Conduent",     "careers-conduent"),
+        ("Sabre",        "careers-sabre"),
+        ("Unison",       "careers-unisonpoint"),
+    ]:
+        try:
+            jobs = scrape_icims(name, token)
+            all_jobs += jobs
+            status_rows.append([name, "iCIMS (Intern/EC)", "Success", now_str, f"Found {len(jobs)} jobs"])
+        except Exception as e:
+            status_rows.append([name, "iCIMS (Intern/EC)", "Failed", now_str, str(e)])
+            print(f"Error scraping iCIMS intern for {name}: {e}")
+
+    # ── Intern / Early Career — SmartRecruiters ───────────────────────────────
+    # Additional Indian consumer tech companies on SmartRecruiters
+    for name, company_id in [
+        ("Razorpay",      "Razorpay"),
+        ("Paytm",         "Paytm"),
+        ("PhonePe",       "PhonePe"),
+        ("InMobi",        "InMobi"),
+        ("boAt Lifestyle","boatlifestyle"),
+        ("Mamaearth",     "Mamaearth"),
+        ("Urban Company", "UrbanCompany"),
+        ("Dunzo",         "Dunzo"),
+        ("Rapido",        "Rapido"),
+        ("BlackBuck",     "BlackBuck"),
+    ]:
+        try:
+            jobs = scrape_smartrecruiters(name, company_id)
+            all_jobs += jobs
+            status_rows.append([name, "SmartRecruiters (Intern/EC)", "Success", now_str, f"Found {len(jobs)} jobs"])
+        except Exception as e:
+            status_rows.append([name, "SmartRecruiters (Intern/EC)", "Failed", now_str, str(e)])
+            print(f"Error scraping SmartRecruiters intern for {name}: {e}")
+
     # Write status health report to CSV sheet
     try:
         status_file = "company_status.csv"
