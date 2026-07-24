@@ -67,6 +67,27 @@ def send_telegram_alert(message):
 def run_tracker_and_alert():
     logger.info("Starting SimplifyJobs GitHub tracker check...")
     headers = {"User-Agent": "HiringRadar-Tracker-Engine"}
+def is_india_target(loc_str: str) -> bool:
+    loc = loc_str.lower()
+    # Explicitly block non-India targets
+    blocked = [
+        "usa", "united states", "u.s.", "uk", "london", "canada", "seattle", 
+        "austin", "phoenix", "brighton", "redmond", "o'fallon", "san francisco", "seattle", "wa"
+    ]
+    if any(b in loc for b in blocked):
+        # Keep if it explicitly mentions India
+        if not any(k in loc for k in ["india", "bangalore", "bengaluru", "hyderabad"]):
+            return False
+            
+    india_keywords = [
+        "india", "bengaluru", "bangalore", "hyderabad", "pune", "mumbai", 
+        "gurgaon", "gurugram", "noida", "chennai", "delhi", "remote", "anywhere"
+    ]
+    return any(k in loc for k in india_keywords)
+
+def run_tracker_and_alert():
+    logger.info("Starting SimplifyJobs GitHub tracker check...")
+    headers = {"User-Agent": "HiringRadar-Tracker-Engine"}
     seen_jobs = load_seen_tracked_jobs()
     new_seen = set(seen_jobs)
     
@@ -101,33 +122,35 @@ def run_tracker_and_alert():
                     # Generate a unique key for deduplication
                     job_key = f"{company_text}||{role_text}||{location_text}"
                     
-                    if job_key in seen_jobs:
-                        continue
-                    
                     company_lower = company_text.lower()
                     matched = [c for c in TARGET_COMPANIES if c in company_lower]
                     
-                    if matched:
-                        new_seen.add(job_key)
-                        new_matches.append({
-                            "board": board_name,
-                            "company": company_text,
-                            "role": role_text,
-                            "location": location_text,
-                            "url": apply_link
-                        })
+                    if matched and is_india_target(location_text):
+                        # Always log the match to stdout so the user sees it here
+                        print(f"👉 MATCH FOUND: [{board_name}] {company_text} - {role_text} ({location_text})")
+                        print(f"   Link: {apply_link}")
+                        
+                        if job_key not in seen_jobs:
+                            new_seen.add(job_key)
+                            new_matches.append({
+                                "board": board_name,
+                                "company": company_text,
+                                "role": role_text,
+                                "location": location_text,
+                                "url": apply_link
+                            })
                         
         except Exception as e:
             logger.error("Error checking %s: %s", board_name, e)
             
     if new_matches:
-        logger.info("Found %d new target matching roles!", len(new_matches))
+        logger.info("Found %d new target matching roles for India!", len(new_matches))
         # Alert for each matching role (max 10 to prevent spamming)
         for job in new_matches[:10]:
             link_str = f"[Apply Now]({job['url']})" if job['url'] else "_No direct link provided_"
             msg = (
                 f"🚨 **HIRING RADAR ALERT** 🛰️\n\n"
-                f"New target role detected on SimplifyJobs!\n\n"
+                f"New target role detected on SimplifyJobs (India/Remote)!\n\n"
                 f"• **Company:** {job['company']}\n"
                 f"• **Role:** {job['role']}\n"
                 f"• **Location:** {job['location']}\n"
@@ -139,6 +162,7 @@ def run_tracker_and_alert():
         save_seen_tracked_jobs(new_seen)
     else:
         logger.info("No new target matching roles found on SimplifyJobs.")
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
