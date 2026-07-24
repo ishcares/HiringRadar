@@ -918,6 +918,17 @@ async def alert_job(context: ContextTypes.DEFAULT_TYPE):
         if not matched:
             continue
 
+        # Target laser-focus filter for Ishita (7401731570)
+        if chat_id == 7401731570:
+            target_companies = [
+                "bloomberg", "jpmorgan", "barclays", "goldman", "morgan stanley", 
+                "american express", "amex", "visa", "mastercard", "deutsche bank", 
+                "amazon", "google", "microsoft", "stripe", "rubrik"
+            ]
+            matched = [(job, score) for job, score in matched if any(tc in job["company"].lower() for tc in target_companies)]
+            if not matched:
+                continue
+
         # Filter out jobs this student has already seen
         unseen = []
         for job, score in matched:
