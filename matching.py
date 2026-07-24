@@ -1127,63 +1127,60 @@ def match_jobs_for_student(
                 filtered_by_loc.append(j)
         jobs = filtered_by_loc
 
-    # ── Experience-aware job type filtering ───────────────────────────────────
-    # Rules for freshers (effective_exp <= 1 year, covers ALL users with 0-1 yrs
-    # experience — whether still in college, recently graduated, or career switching):
-    #
-    #  FRESHER PATH (effective_exp <= 1):
-    #   - Always show: internship jobs
-    #   - Always show: early career / graduate programs / new grad roles
-    #   - Also show:   full-time jobs that explicitly target their batch/grad year
-    #                  (e.g. "2027 batch", "graduating 2027", "pass-out 2027")
-    #   - Block:       all other generic full-time roles
-    #                  (unless user explicitly chose "fulltime" job type)
-    #
-    #  EXPERIENCED PATH (effective_exp >= 2):
-    #   - Respect job_type preference as-is (no smart filter needed)
+    # ── Batch-year detection (HIGHEST PRIORITY) ───────────────────────────────
+    # If a JD explicitly says "2027 batch", "graduating 2027", "pass-out 2027",
+    # that job is shown to the student UNCONDITIONALLY — regardless of job type
+    # (internship / full-time / early career) and regardless of experience tag.
+    # The company is telling us directly: this batch is welcome. Trust it.
     current_year = datetime.now().year
     grad_year = student.get("graduation_year", current_year)
     explicit_job_type = student.get("job_type") or "both"
+    student_years = student.get("years_of_experience")
+    effective_exp = student_years if student_years is not None else max(0, current_year - grad_year)
 
-    if grad_year > current_year:
-        filtered = []
-        for j in jobs:
-            if is_internship(j):
-                filtered.append(j)  # always include internships
-                continue
-            if is_early_career(j):
-                filtered.append(j)  # early career / graduate programs always included
-                continue
-            # Full-time: include only if JD explicitly targets student's batch year
-            batch_years = extract_target_batch_years(
-                j.get("title", ""), j.get("description") or ""
-            )
-            if grad_year in batch_years:
-                filtered.append(j)
-            elif explicit_job_type == "fulltime":
-                # User explicitly wants full-time → include generic entry-level too
-                filtered.append(j)
-        jobs = filtered
-    else:
-        jobs = filter_by_job_type(jobs, explicit_job_type)
+    batch_priority_jobs = []   # pass all filters — JD explicitly targets this batch
+    remaining_jobs = []        # go through normal fresher filter pipeline
 
-    roles = student.get("preferred_roles") or []
-
-    # NOTE: we no longer hard-filter jobs by matches_role() here. Doing so
-    # previously zeroed-out semantically strong matches whose titles just
-    # didn't literally contain a keyword (e.g. "Applied Scientist" for an
-    # "ml" role preference). Role match is now purely a *scoring bonus*
-    # inside _score_jobs, so the embedding similarity gets a fair say.
-
-    if not jobs:
-        return []
-
-    student_years = student.get("years_of_experience")  # None if not set (older profiles)
-    jobs = _filter_fresher_jobs(jobs, grad_year, current_year, student_years=student_years)
-    
-    # Filter out ineligible jobs (DCEO, mechanical/electrical, wrong graduation year, etc.)
-    eligible_jobs = []
     for j in jobs:
+        batch_years = extract_target_batch_years(
+            j.get("title", ""), j.get("description") or ""
+        )
+        if grad_year in batch_years:
+            batch_priority_jobs.append(j)  # ← directly included, no further filtering
+        else:
+            remaining_jobs.append(j)
+
+    # ── Normal fresher filter pipeline for non-batch-targeted jobs ────────────
+    # Rules (effective_exp <= 1):
+    #   - Always show: internships + early career / graduate programs
+    #   - Block: all other generic full-time (unless user chose "fulltime")
+    # Rules (effective_exp >= 2):
+    #   - Respect job_type preference as-is
+    if effective_exp <= 1:
+        fresher_filtered = []
+        for j in remaining_jobs:
+            if is_internship(j):
+                fresher_filtered.append(j)       # always: internship roles
+            elif is_early_career(j):
+                fresher_filtered.append(j)       # always: early career / new grad programs
+            elif explicit_job_type == "fulltime":
+                fresher_filtered.append(j)       # user explicitly wants full-time
+        remaining_jobs = fresher_filtered
+    else:
+        remaining_jobs = filter_by_job_type(remaining_jobs, explicit_job_type)
+
+    roles = student.get("preferred_roles") or []\
+
+    # ── NOTE: role keyword hard-filter removed (see note below) ──────────────
+    # Role match is now a *scoring bonus* inside _score_jobs so the embedding
+    # gets a fair say (e.g. "Applied Scientist" for an "ml" preference).
+
+    # ── Experience + eligibility filters (applied only to non-batch-priority) ─
+    remaining_jobs = _filter_fresher_jobs(
+        remaining_jobs, grad_year, current_year, student_years=student_years
+    )
+    eligible_remaining = []
+    for j in remaining_jobs:
         is_eligible, _ = check_eligibility(
             student,
             j["title"],
@@ -1193,8 +1190,25 @@ def match_jobs_for_student(
             min_years_experience=j.get("min_years_experience")
         )
         if is_eligible:
-            eligible_jobs.append(j)
-    jobs = eligible_jobs
+            eligible_remaining.append(j)
+
+    # ── Also run eligibility on batch-priority jobs (but only hard non-tech check)
+    # We trust batch year signal for experience, but still block obvious mismatches
+    # (e.g. a VLSI/hardware role for a CS student)
+    eligible_batch = []
+    for j in batch_priority_jobs:
+        is_eligible, reason = check_eligibility(
+            student,
+            j["title"],
+            j.get("company", ""),
+            j.get("description") or "",
+            category=j.get("category"),
+            min_years_experience=0  # treat as 0 required — batch signal overrides
+        )
+        if is_eligible:
+            eligible_batch.append(j)
+
+    jobs = eligible_batch + eligible_remaining
 
     if not jobs:
         return []
@@ -1203,6 +1217,7 @@ def match_jobs_for_student(
     ranked = sorted(zip(jobs, scores), key=lambda x: x[1], reverse=True)
     results = [(job, score) for job, score in ranked if score >= threshold][:top_n]
     return [(job, _rescale_for_display(score, used_fallback)) for job, score in results]
+
 
 
 def build_match_reason(job: dict, student: dict) -> str:
