@@ -739,8 +739,13 @@ def scrape_amazon(max_results: int = 300) -> list[dict]:
             job_id  = job.get("id_icims") or job.get("job_id", "")
             job_url = f"https://amazon.jobs/en/jobs/{job_id}" if job_id else ""
 
-            # Amazon's search API returns description inline — strip HTML tags
-            raw_desc = job.get("description", "") or ""
+            # Amazon's search API returns description, basic qualifications, and preferred qualifications separately.
+            # Concatenate them all so we can parse experience requirements and run semantic match accurately.
+            raw_desc = (
+                (job.get("description") or "") + " " +
+                (job.get("basic_qualifications") or "") + " " +
+                (job.get("preferred_qualifications") or "")
+            )
             import re as _re
             description = _re.sub(r"<[^>]+>", " ", raw_desc).strip()
 
@@ -819,8 +824,13 @@ def scrape_amazon_interns(max_results: int = 100) -> list[dict]:
             job_id  = job.get("id_icims") or job.get("job_id", "")
             job_url = f"https://amazon.jobs/en/jobs/{job_id}" if job_id else ""
 
+            # Concatenate description and qualifications
+            raw_desc = (
+                (job.get("description") or "") + " " +
+                (job.get("basic_qualifications") or "") + " " +
+                (job.get("preferred_qualifications") or "")
+            )
             import re as _re
-            raw_desc = job.get("description", "") or ""
             description = _re.sub(r"<[^>]+>", " ", raw_desc).strip()
 
             if is_program_restricted(title, description):
