@@ -1,4 +1,37 @@
-.env
-__pycache__
-seen_jobs.json
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.cache/
+
+# Virtual Environments
+venv/
 .venv/
+env/
+
+# Environment Variables & Secrets
+.env
+secret_key*
+
+# Local Data / Cache files
+seen_jobs.json
+scraped_jobs.csv
+*.pdf
+*.csv
+
+# Scratch / Diagnostic scripts
+scratch/
+temp*/
+*.log
+
+# IDE & Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
