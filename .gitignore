@@ -22,7 +22,9 @@ scraped_jobs.csv
 *.csv
 
 # Scratch / Diagnostic scripts
-scratch/
+scratch/*
+!scratch/trigger_scrape.py
+!scratch/github_tracker.py
 temp*/
 *.log
 migrations/
