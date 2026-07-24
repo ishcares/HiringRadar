@@ -502,8 +502,9 @@ def scrape_lever(company_name, company_slug):
     return relevant
 
 def scrape_ashby(company_name, company_token):
-    # Try public API first
-    api_url = f"https://api.ashbyhq.com/v1/iframe/web/jobs?jobBoardId={company_token}"
+
+    # Public unauthenticated Job Board API
+    api_url = f"https://api.ashbyhq.com/posting-api/job-board/{company_token}"
     try:
         response = requests.get(api_url, timeout=10)
         if response.status_code == 200:
@@ -519,7 +520,7 @@ def scrape_ashby(company_name, company_token):
                     continue
                 description = j.get('descriptionPlain', '') or j.get('descriptionHtml', '') or ''
                 
-                # Block program-restricted listings (Ashby API lists description)
+                # Block program-restricted listings
                 if is_program_restricted(title, description):
                     continue
                     
@@ -535,54 +536,18 @@ def scrape_ashby(company_name, company_token):
             return relevant
     except Exception as e:
         print(f"Ashby API failed for {company_name}: {e}")
-
-    # Fallback to jobs.ashbyhq.com HTML parser if API throws 401
-    try:
-        from bs4 import BeautifulSoup
-        from urllib.parse import urljoin
-        web_url = f"https://jobs.ashbyhq.com/{company_token}"
-        web_res = requests.get(web_url, timeout=10)
-        if web_res.status_code == 200:
-            soup = BeautifulSoup(web_res.text, 'html.parser')
-            relevant = []
-            for a in soup.find_all('a', href=True):
-                if f"/{company_token}/" in a['href']:
-                    job_url = urljoin(web_url, a['href'])
-                    title_elem = a.find('h4')
-                    title = title_elem.text.strip() if title_elem else a.text.strip()
-                    if not title:
-                        continue
-                    category = check_job_relevance_and_category(title)
-                    if not category:
-                        continue
-                    # Ashby HTML board doesn't expose location without a subpage crawl.
-                    # We accept all listings here — the detail page fetch (if added later)
-                    # can refine the location. For now we tag as Remote / India.
-                    
-                    # Block program-restricted listings
-                    if is_program_restricted(title):
-                        continue
-                        
-                    relevant.append({
-                        "company": company_name,
-                        "title": title,
-                        "location": "Remote / India",
-                        "url": job_url,
-                        "category": category,
-                        "description": "",
-                        "remote_class": "india",  # Hardcoded fallback target matching
-                    })
-            return relevant
-    except Exception as e:
-        print(f"Ashby HTML fallback failed for {company_name}: {e}")
     return []
+
 
 def scrape_keka(company_name, tenant):
     web_url = f"https://{tenant}.keka.com/careers"
     try:
         from bs4 import BeautifulSoup
         from urllib.parse import urljoin
-        res = requests.get(web_url, timeout=10)
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        
+        res = requests.get(web_url, timeout=10, verify=False)
         if res.status_code == 200:
             soup = BeautifulSoup(res.text, 'html.parser')
             relevant = []
@@ -591,26 +556,21 @@ def scrape_keka(company_name, tenant):
                 if "/applyjob/" in href:
                     job_url = urljoin(web_url, href)
                     title = a.text.strip()
-                    # Clean title if it contains apply text
                     title = title.replace("Apply", "").strip()
                     category = check_job_relevance_and_category(title)
                     if not category:
                         continue
                     
-                    # Try to check location from surrounding text elements in Keka
                     location = "India / Remote"
                     parent = a.find_parent()
                     if parent:
                         parent_text = parent.text.lower()
-                        # If a non-India location is found in the card, filter it out
                         if not is_india_location(parent_text):
                             continue
                             
-                    # Block program-restricted listings
                     if is_program_restricted(title):
                         continue
                         
-                    # Keka HTML board does not include job descriptions inline.
                     relevant.append({
                         "company": company_name,
                         "title": title,
@@ -624,6 +584,7 @@ def scrape_keka(company_name, tenant):
     except Exception as e:
         print(f"Keka fetch failed for {company_name}: {e}")
     return []
+
 
 def scrape_icims(company_name, customer_token):
     web_url = f"https://{customer_token}.icims.com/jobs/search?pr=0&in_iframe=1"
@@ -999,11 +960,6 @@ def get_all_jobs():
     # ── iCIMS ─────────────────────────────────────────────────────────────────
     for name, token in [
         ("GitHub",       "careers-githubinc"),
-        ("Synchrony",    "careers-synchronyfinancial"),
-        ("NCR Voyix",    "careers-ncrvoyix"),
-        ("Conduent",     "careers-conduent"),
-        ("Sabre",        "careers-sabre"),
-        ("Unison",       "careers-unisonpoint"),
     ]:
         try:
             jobs = scrape_icims(name, token)
