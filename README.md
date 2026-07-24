@@ -19,10 +19,9 @@ HiringRadar is an automated, real-time job matching and alert system built for c
 
 ## 🎯 Target Companies Tracked
 
-HiringRadar is configured and optimized to fetch, parse, and match listings from target high-growth technology companies and financial institutions:
+HiringRadar is configured and optimized to fetch, parse, and match listings from target high-growth technology companies and startups:
 
 *   **Big Tech & Core Product:** Amazon, Stripe, Rubrik, Visa, Mastercard
-*   **Finance & Investment Banking:** JPMorgan Chase, Goldman Sachs, Morgan Stanley, Barclays, American Express, Deutsche Bank
 *   **High-Growth Startups:** Razorpay, PhonePe, CRED, Groww, Paytm, Meesho, and more.
 
 ---
@@ -35,14 +34,9 @@ HiringRadar's matching engine aligns candidate profiles to the distinct hiring c
 *   **The Bar:** Deep focus on Data Structures & Algorithms (DSA), system design foundation, and horizontal scaling.
 *   **HiringRadar Alignment:** Flags target graduation batch years (e.g., *2027 grads*), matches on core programming paradigms (Python, C++, Java), and flags containerization and cloud scaling experience (AWS, Docker, Kubernetes).
 
-### 2. High-Bar Fintech & Investment Banking (Stripe, Goldman Sachs, JPMorgan Chase, Morgan Stanley, Barclays, Deutsche Bank, Amex)
-*   **The Bar:** High-throughput backend systems, secure API gateways, database transactions, and low-latency execution.
-*   **HiringRadar Alignment:** Prioritizes backend technologies (FastAPI, Node.js), relational query design (PostgreSQL, SQL, database indexing), secure authentication (JWT, OAuth), and Unix/Linux system fundamentals.
-
-### 3. Scaled Enterprise Product (Rubrik, Visa, Mastercard)
-*   **The Bar:** Data resiliency, caching layer optimization, storage operations, and cloud resource management.
-*   **HiringRadar Alignment:** Ranks candidates on storage systems, caching layers (Redis), container orchestration, and CI/CD pipelines.
-
+### 2. High-Bar Fintech & Core Product (Stripe, Rubrik, Visa, Mastercard)
+*   **The Bar:** Low-latency API design, data resiliency, high-throughput database design, and cloud container orchestration.
+*   **HiringRadar Alignment:** Ranks candidates on backend frameworks (FastAPI, Node.js), query design (PostgreSQL/SQL, database indexing), secure authentication (JWT, OAuth), caching layers (Redis), and CI/CD pipelines.
 
 ---
 
