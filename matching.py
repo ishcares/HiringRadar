@@ -1127,16 +1127,20 @@ def match_jobs_for_student(
                 filtered_by_loc.append(j)
         jobs = filtered_by_loc
 
-    # ── Graduation-year-aware job type filtering ──────────────────────────────
-    # Rules:
-    #  A) Student still in college (grad_year > current_year):
-    #     - Always show internship jobs
-    #     - ALSO show full-time jobs that explicitly mention their batch/grad year
-    #       (e.g. "2027 batch", "graduating 2027", "pass-out 2027")
-    #     - Block all other full-time jobs (unless they chose "fulltime" explicitly,
-    #       in which case also include generic entry-level full-time)
-    #  B) Already graduated (grad_year <= current_year):
-    #     - Respect the student's job_type preference as-is
+    # ── Experience-aware job type filtering ───────────────────────────────────
+    # Rules for freshers (effective_exp <= 1 year, covers ALL users with 0-1 yrs
+    # experience — whether still in college, recently graduated, or career switching):
+    #
+    #  FRESHER PATH (effective_exp <= 1):
+    #   - Always show: internship jobs
+    #   - Always show: early career / graduate programs / new grad roles
+    #   - Also show:   full-time jobs that explicitly target their batch/grad year
+    #                  (e.g. "2027 batch", "graduating 2027", "pass-out 2027")
+    #   - Block:       all other generic full-time roles
+    #                  (unless user explicitly chose "fulltime" job type)
+    #
+    #  EXPERIENCED PATH (effective_exp >= 2):
+    #   - Respect job_type preference as-is (no smart filter needed)
     current_year = datetime.now().year
     grad_year = student.get("graduation_year", current_year)
     explicit_job_type = student.get("job_type") or "both"
