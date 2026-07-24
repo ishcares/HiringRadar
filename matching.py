@@ -364,10 +364,111 @@ def is_internship(job: dict) -> bool:
     return any(k in job["title"].lower() for k in ["intern", "internship", "trainee"])
 
 
+def is_early_career(job: dict) -> bool:
+    """
+    True if the role is explicitly designed for fresh graduates / campus hires.
+    These are full-time roles but targeted at 0-experience candidates.
+
+    Examples: "Software Engineer, Early Career", "Graduate Software Engineer",
+    "New Grad SDE", "Campus Hire", "Associate SDE", "Technology Analyst Program"
+    """
+    title_lower = job["title"].lower()
+    desc_lower = (job.get("description") or "").lower()
+    early_keywords = [
+        "early career",
+        "new grad",
+        "new graduate",
+        "graduate program",
+        "grad program",
+        "graduate hire",
+        "graduate engineer",
+        "graduate developer",
+        "campus hire",
+        "campus recruitment",
+        "campus program",
+        "university graduate",
+        "university program",
+        "rotational program",
+        "associate program",
+        "technology analyst program",
+        "analyst program",
+        "fresher",
+        "entry level",
+        "entry-level",
+        "0 years",
+        "0-1 year",
+        "0 to 1 year",
+    ]
+    # Check title first (strongest signal)
+    if any(k in title_lower for k in early_keywords):
+        return True
+    # Check first 500 chars of description for explicit fresher targeting
+    desc_snippet = desc_lower[:500]
+    if any(k in desc_snippet for k in ["fresh graduate", "recent graduate", "campus recruit", "fresher candidate", "0-1 year"]):
+        return True
+    return False
+
+
 def filter_by_job_type(jobs: list, job_type: str) -> list:
     if job_type == "both" or not job_type:
         return jobs
     return [j for j in jobs if (job_type == "internship") == is_internship(j)]
+
+
+def extract_target_batch_years(title: str, description: str) -> set:
+    """
+    Extract graduation batch years explicitly mentioned in a job posting.
+    Returns a set of years (e.g. {2026, 2027}).
+
+    Patterns matched (case-insensitive):
+      - "2027 batch" / "batch 2027" / "batch of 2027"
+      - "graduating in/by 2027" / "graduation 2027"
+      - "pass-out 2027" / "passout 2027" / "pass out 2027"
+      - "2026/2027 graduates" / "2026-27 batch"
+      - "fresher 2027" / "freshers from 2027"
+      - "2027 pass out" / "2027 graduate"
+    """
+    text = (title + " " + (description or "")).lower()
+    found = set()
+
+    # "batch 2027" / "2027 batch" / "batch of 2027" / "cohort 2027"
+    for m in re.finditer(
+        r'\b(?:batch|cohort)\s+(?:of\s+)?(\d{4})\b|\b(\d{4})\s+batch\b', text
+    ):
+        yr = int(m.group(1) or m.group(2))
+        if 2020 <= yr <= 2032:
+            found.add(yr)
+
+    # "graduating in/by 2027" / "graduation year 2027" / "graduation: 2027"
+    for m in re.finditer(r'graduating\s+(?:in|by)?\s*(\d{4})|graduation\s+(?:year\s+|:\s*)?(\d{4})', text):
+        yr = int(m.group(1) or m.group(2))
+        if 2020 <= yr <= 2032:
+            found.add(yr)
+
+    # "pass-out 2027" / "pass out 2027" / "passout 2027" / "2027 pass-out"
+    for m in re.finditer(r'pass[\s-]?out\s+(\d{4})|(\d{4})\s+pass[\s-]?out', text):
+        yr = int(m.group(1) or m.group(2))
+        if 2020 <= yr <= 2032:
+            found.add(yr)
+
+    # "2026/2027" or "2026-27" followed by batch/graduate/pass
+    for m in re.finditer(
+        r'\b(\d{4})[/-](\d{2}|\d{4})\s*(?:batch|graduates?|pass|passing)', text
+    ):
+        yr1 = int(m.group(1))
+        raw2 = m.group(2)
+        yr2 = int(raw2) if len(raw2) == 4 else yr1 // 100 * 100 + int(raw2)
+        for yr in (yr1, yr2):
+            if 2020 <= yr <= 2032:
+                found.add(yr)
+
+    # "freshers from/of/batch 2027" / "fresher 2027"
+    for m in re.finditer(r'freshers?\s+(?:of|from|batch)?\s*(\d{4})', text):
+        yr = int(m.group(1))
+        if 2020 <= yr <= 2032:
+            found.add(yr)
+
+    return found
 
 
 def _expand_title(title: str) -> str:
@@ -1027,19 +1128,41 @@ def match_jobs_for_student(
         jobs = filtered_by_loc
 
     # ── Graduation-year-aware job type filtering ──────────────────────────────
-    # If a student is still in college (grad_year > current_year), default their
-    # effective job type to "internship" — unless they explicitly chose "fulltime".
-    # A 2027 grad should NOT receive Amazon SDE full-time alerts by default.
-    # They can override this by running /experience fulltime.
+    # Rules:
+    #  A) Student still in college (grad_year > current_year):
+    #     - Always show internship jobs
+    #     - ALSO show full-time jobs that explicitly mention their batch/grad year
+    #       (e.g. "2027 batch", "graduating 2027", "pass-out 2027")
+    #     - Block all other full-time jobs (unless they chose "fulltime" explicitly,
+    #       in which case also include generic entry-level full-time)
+    #  B) Already graduated (grad_year <= current_year):
+    #     - Respect the student's job_type preference as-is
     current_year = datetime.now().year
     grad_year = student.get("graduation_year", current_year)
     explicit_job_type = student.get("job_type") or "both"
-    if grad_year > current_year and explicit_job_type != "fulltime":
-        effective_job_type = "internship"
-    else:
-        effective_job_type = explicit_job_type
 
-    jobs = filter_by_job_type(jobs, effective_job_type)
+    if grad_year > current_year:
+        filtered = []
+        for j in jobs:
+            if is_internship(j):
+                filtered.append(j)  # always include internships
+                continue
+            if is_early_career(j):
+                filtered.append(j)  # early career / graduate programs always included
+                continue
+            # Full-time: include only if JD explicitly targets student's batch year
+            batch_years = extract_target_batch_years(
+                j.get("title", ""), j.get("description") or ""
+            )
+            if grad_year in batch_years:
+                filtered.append(j)
+            elif explicit_job_type == "fulltime":
+                # User explicitly wants full-time → include generic entry-level too
+                filtered.append(j)
+        jobs = filtered
+    else:
+        jobs = filter_by_job_type(jobs, explicit_job_type)
+
     roles = student.get("preferred_roles") or []
 
     # NOTE: we no longer hard-filter jobs by matches_role() here. Doing so
