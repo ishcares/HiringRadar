@@ -895,25 +895,6 @@ def get_all_jobs():
         ("Remote.com",    "remote"),
         ("Jane Street",   "janestreet"),
         ("Slice",         "slice"),
-        ("Uber",          "uber"),
-        ("Atlassian",     "atlassian"),
-        # Indian startups & consumer brands (Greenhouse confirmed)
-        ("boAt Lifestyle","imaginemarketingboat"),
-        ("Urban Company", "urbanclap"),
-        ("Dunzo",         "dunzo"),
-        ("Rapido",        "rapido"),
-        ("BlackBuck",     "blackbuck"),
-        ("Mamaearth",     "honasconsumerlimited"),
-        ("Ola",           "olacabs"),
-        ("Lenskart",      "lenskart"),
-        ("Vedantu",       "vedantu"),
-        ("Unacademy",     "unacademy"),
-        ("ShareChat",     "sharechat"),
-        ("BharatPe",      "bharatpe"),
-        ("BrowserStack",  "browserstack"),
-        ("Hasura",        "hasura"),
-        ("Setu",          "setu"),
-        ("Hotstar",       "disneyhotstar"),
     ]:
         try:
             jobs = scrape_greenhouse_json(name, token)
