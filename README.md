@@ -60,11 +60,25 @@ graph TD
 
 ## 🛠️ Technology Stack
 
-*   **Language:** Python 3.11+
-*   **Database:** Supabase (PostgreSQL)
-*   **Vector Embeddings:** Sentence-Transformers (`BAAI/bge-small-en-v1.5`)
-*   **Libraries:** Requests, BeautifulSoup4, PyPDF2 (for resume ingestion)
-*   **Deployment:** Systemd service on AWS EC2, automated webhook deployment
+`Python` · `FastAPI` · `sentence-transformers` (`BAAI/bge-small-en-v1.5`) · `Supabase (PostgreSQL)` · `python-telegram-bot` · `BeautifulSoup` · `AWS EC2` · `Docker` · `Gemini API`
+
+---
+
+## ⚡ Real Production Challenges Solved
+
+*   **False-Positive Matching Bug:** Replaced fragile substring matching with an exact alias-map matcher after diagnosing systematic false positives.
+*   **Zero-Skill-Extraction Scoring Guard:** Fixed a silent failure mode where failed extractions defaulted to a false 100% match instead of erroring visibly.
+*   **Per-Student Delivery Dedup:** Implemented a `sent_jobs` tracking table keyed on `(chat_id, job_url_hash)` to stop duplicate alerts across scrape cycles.
+*   **Multi-Instance Telegram Bot Conflicts:** Diagnosed and resolved a polling conflict caused by overlapping bot instances in staging vs. production.
+*   **ATS-Specific Scraper Failures:** Fixed SSL/endpoint quirks across Ashby, Keka, and other ATS platforms as each surfaced its own edge cases in production.
+
+---
+
+## 📈 Status & Ops
+
+*   **Live in Production:** Hosted on AWS EC2, actively serving SDE matches to **58+ active subscribers**.
+*   **Active Features:** Currently building a premium gap-analysis module (Aligner) with Razorpay API payment integrations.
+*   *Built solo, end to end — scraping, backend pipelines, ML matching, deployment, and ops.*
 
 ---
 
