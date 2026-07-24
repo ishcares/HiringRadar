@@ -1214,7 +1214,17 @@ def match_jobs_for_student(
         return []
 
     scores, used_fallback = _score_jobs(jobs, student, roles, embed_fn)
-    ranked = sorted(zip(jobs, scores), key=lambda x: x[1], reverse=True)
+    
+    # Apply a 10% score boost to explicitly targeted internships and early career roles
+    # to prioritize them over generic full-time roles for freshers.
+    boosted_ranked = []
+    for job, score in zip(jobs, scores):
+        final_score = score
+        if is_internship(job) or is_early_career(job):
+            final_score = min(1.0, score + 0.10)
+        boosted_ranked.append((job, final_score))
+
+    ranked = sorted(boosted_ranked, key=lambda x: x[1], reverse=True)
     results = [(job, score) for job, score in ranked if score >= threshold][:top_n]
     return [(job, _rescale_for_display(score, used_fallback)) for job, score in results]
 
