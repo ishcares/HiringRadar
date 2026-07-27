@@ -1116,7 +1116,7 @@ def match_jobs_for_student(
         target_category = None  # fallback to show all
 
     if target_category:
-        jobs = [j for j in jobs if j.get("category") == target_category]
+        jobs = [j for j in jobs if j.get("category") == target_category or j.get("category") is None]
 
     pref_locs = student.get("preferred_locations") or []
     if pref_locs and not any(loc.lower().strip() == "any" for loc in pref_locs):
@@ -1209,6 +1209,8 @@ def match_jobs_for_student(
             eligible_batch.append(j)
 
     jobs = eligible_batch + eligible_remaining
+    if roles:
+        jobs = [j for j in jobs if matches_role(j["title"], roles)]
 
     if not jobs:
         return []

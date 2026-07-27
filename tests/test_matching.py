@@ -29,6 +29,12 @@ from matching import (
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
+@pytest.fixture(autouse=True)
+def clear_embed_cache():
+    from matching import _EMBED_CACHE
+    _EMBED_CACHE.clear()
+    yield
+    _EMBED_CACHE.clear()
 
 @pytest.fixture
 def sample_jobs():
@@ -110,29 +116,38 @@ class TestFresherFilter:
 # ── Scoring with mock embeddings ─────────────────────────────────────────────
 
 def _mock_embed_fn(texts):
-    """Return deterministic unit vectors: profile at [1,0,0], jobs vary."""
+    """Return unit vectors based on text content keywords to simulate semantic similarity."""
     vectors = []
-    for i, text in enumerate(texts):
-        if i == 0:
+    for text in texts:
+        t = text.lower()
+        if "backend" in t:
             vectors.append([1.0, 0.0, 0.0])
+        elif "ml" in t or "machine learning" in t:
+            vectors.append([0.0, 1.0, 0.0])
+        elif "frontend" in t or "react" in t:
+            vectors.append([0.0, 0.0, 1.0])
         else:
-            # Slight variation per job index
-            angle = 0.1 * i
-            vectors.append([0.9, angle, 0.1])
+            vectors.append([0.5, 0.5, 0.5])
     return vectors
 
 
 class TestScoring:
     def test_role_bonus_increases_score(self, sample_jobs):
-        student = {
+        student_with = {
             "graduation_year": 2026,
             "skills": ["Python"],
             "preferred_roles": ["backend"],
             "job_type": "both",
         }
+        student_without = {
+            "graduation_year": 2026,
+            "skills": ["Python"],
+            "preferred_roles": ["ml"],
+            "job_type": "both",
+        }
         backend_job = next(j for j in sample_jobs if j["title"] == "Backend Engineer")
-        scores_with_bonus = _score_jobs([backend_job], student, ["backend"], _mock_embed_fn)
-        scores_no_bonus = _score_jobs([backend_job], student, ["ml"], _mock_embed_fn)
+        scores_with_bonus, _ = _score_jobs([backend_job], student_with, ["backend"], _mock_embed_fn)
+        scores_no_bonus, _ = _score_jobs([backend_job], student_without, ["ml"], _mock_embed_fn)
         assert scores_with_bonus[0] > scores_no_bonus[0]
 
     def test_hf_fallback_uses_keyword_only_not_silent_pass(self, sample_jobs):
@@ -190,9 +205,9 @@ class TestMatchJobsForStudent:
             return [[1, 0, 0]] + [[0, 1, 0]] * (len(texts) - 1)
 
         matched = match_jobs_for_student(
-            student, sample_jobs, threshold=0.25, embed_fn=low_similarity_embed
+            student, sample_jobs, threshold=0.45, embed_fn=low_similarity_embed
         )
-        # Orthogonal vectors → cosine 0, even with +0.15 bonus = 0.15 < 0.25
+        # Orthogonal vectors -> blended score is 0.30 + 0.10 boost = 0.40 < 0.45 -> no match
         assert len(matched) == 0
 
     def test_empty_when_no_role_match(self, sample_jobs):
@@ -232,15 +247,14 @@ class TestMatchJobsForStudent:
         }
 
         def low_embed(texts):
-            # All jobs get cosine ~ 0; with ROLE_BONUS = 0.15 they just barely miss 0.25
             return [[1, 0, 0]] + [[0, 1, 0]] * (len(texts) - 1)
 
-        # At default threshold (0.25) backend jobs score 0+0.15 = 0.15 → no match
-        no_match = match_jobs_for_student(student, sample_jobs, threshold=0.25, embed_fn=low_embed)
+        # At threshold (0.45) backend jobs score 0.40 -> no match
+        no_match = match_jobs_for_student(student, sample_jobs, threshold=0.45, embed_fn=low_embed)
         assert len(no_match) == 0
 
-        # At lowered threshold (0.10) the same jobs score 0.15 → match
-        with_match = match_jobs_for_student(student, sample_jobs, threshold=0.10, embed_fn=low_embed)
+        # At lowered threshold (0.35) the same jobs score 0.40 -> match
+        with_match = match_jobs_for_student(student, sample_jobs, threshold=0.35, embed_fn=low_embed)
         assert len(with_match) > 0
 
 
