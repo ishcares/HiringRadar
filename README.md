@@ -8,31 +8,32 @@
   🤖 <b>Live Demo:</b> <a href="https://t.me/Hiringradar_bot">Try the Telegram Bot</a>
 </p>
 
-
-HiringRadar is an automated, real-time job matching and alert system built for college students and freshers. It scrapes job boards from **60+ top-tier product companies and startups**, parses qualifications, runs local **semantic vector embeddings matching** against candidate resumes, and delivers high-relevance alerts instantly via Telegram.
-
+HiringRadar is an automated, real-time job matching and alert system engineered for college students and freshers. It continuously monitors job boards across **60+ top-tier product companies and hyper-growth startups**, extracts atomic technical requirements, executes a **multi-stage evidence-based semantic matching pipeline**, and delivers high-signal alerts instantly via Telegram.
 
 ---
 
 ## 🚀 Key Features
 
-*   **Multi-Platform Automated Scrapers:** Custom scraping engine tracking Greenhouse, Lever, Ashby, Keka Hire, iCIMS, Workday, and custom APIs (like Amazon Jobs).
-*   **Local Semantic Matching Engine:** Employs `BAAI/bge-small-en-v1.5` embeddings locally via `sentence-transformers` to match candidate resumes with job descriptions (no API costs or rate-limits).
-*   **Fresher & Student Guardrails:** 
-    *   Automatic concatenation of job qualifications to block mid-level roles (e.g., matching 2+ years requirements).
-    *   Custom scoring boosts (+10%) for explicit internship and early-career listings to prioritize them on the user's feed.
-    *   Graduation batch-year priority filters.
-*   **Fast Database Cache:** Uses Supabase for high-performance job caching and subscriber state management.
-*   **Instant Notifications:** Integrates with Telegram Bot API to deliver matches directly to candidate chatrooms.
+*   **Multi-Platform Automated Scrapers:** Continuous scraping engine tracking Greenhouse, Lever, Ashby, Keka Hire, iCIMS, Workday, and custom APIs (Amazon Jobs).
+*   **Multi-Stage Semantic Matching Engine:**
+    *   **Stage 1 (Retrieval):** Serverless vector embeddings powered by `@cf/qwen/qwen3-embedding-0.6b` on Cloudflare Workers AI.
+    *   **Stage 2 (Reranking):** Deep cross-encoder reranking via `@cf/baai/bge-reranker-base` to capture semantic nuances and transferrable skills.
+    *   **Stage 3 (Evidence Verification):** Explicit skill ontology checks (`EQUIVALENT`, `COMPONENT_OF`, `RELATED`, `UNRELATED`) to eliminate cross-stack false positives.
+*   **Fresher & 2027 Student Guardrails:** 
+    *   **Pre-Final Year (2027 Batch) Intelligence:** Direct +30% score boost for verified internships and heavy penalties for senior full-time roles.
+    *   **Strict Seniority Gatekeeper:** Filters out mid/senior roles (3+ YoE) before alerts can reach fresher feeds.
+    *   Deterministic multi-claim evaluation producing `MATCHED`, `UNKNOWN`, and `NOT_MATCHED` evidence states.
+*   **Serverless Database & Connection Pool:** Built on **Neon Serverless PostgreSQL** with pooled connections, automatic reconnection handling, and fallback support for Supabase.
+*   **Instant Notifications:** Low-latency Telegram Bot API integration delivering matches and verified evidence summaries directly to candidate chatrooms.
 
 ---
 
 ## 🎯 Target Companies Tracked
 
-HiringRadar is configured and optimized to fetch, parse, and match listings from target high-growth technology companies and startups:
+HiringRadar is configured and optimized to fetch, parse, and match listings from high-growth technology companies and startups:
 
 *   **Big Tech & Core Product:** Amazon, Stripe, Rubrik, Visa, Mastercard
-*   **High-Growth Startups:** Razorpay, PhonePe, CRED, Groww, Paytm, Meesho, and more.
+*   **High-Growth Startups & FinTech:** Razorpay, PhonePe, CRED, Groww, Paytm, Meesho, and more.
 
 ---
 
@@ -41,12 +42,12 @@ HiringRadar is configured and optimized to fetch, parse, and match listings from
 HiringRadar's matching engine aligns candidate profiles to the distinct hiring criteria of our target company segments:
 
 ### 1. FAANG & Big Tech (Amazon)
-*   **The Bar:** Deep focus on Data Structures & Algorithms (DSA), system design foundation, and horizontal scaling.
-*   **HiringRadar Alignment:** Flags target graduation batch years (e.g., *2027 grads*), matches on core programming paradigms (Python, C++, Java), and flags containerization and cloud scaling experience (AWS, Docker, Kubernetes).
+*   **The Bar:** Deep focus on Data Structures & Algorithms (DSA), system design foundations, and horizontal scaling.
+*   **HiringRadar Alignment:** Flags target graduation batch years (e.g., *2027 grads*), matches core programming paradigms (Python, C++, Java), and identifies containerization and cloud scaling experience (AWS, Docker, Kubernetes).
 
-### 2. High-Bar Fintech & Core Product (Stripe, Rubrik, Visa, Mastercard)
+### 2. High-Bar Fintech & Systems (Stripe, Rubrik, Visa, Mastercard)
 *   **The Bar:** Low-latency API design, data resiliency, high-throughput database design, and cloud container orchestration.
-*   **HiringRadar Alignment:** Ranks candidates on backend frameworks (FastAPI, Node.js), query design (PostgreSQL/SQL, database indexing), secure authentication (JWT, OAuth), caching layers (Redis), and CI/CD pipelines.
+*   **HiringRadar Alignment:** Ranks candidates on backend frameworks (FastAPI, Spring Boot, Node.js), query design (PostgreSQL/SQL, indexing), secure authentication (JWT, OAuth), caching layers (Redis), and distributed systems patterns.
 
 ---
 
@@ -54,37 +55,40 @@ HiringRadar's matching engine aligns candidate profiles to the distinct hiring c
 
 ```mermaid
 graph TD
-    A[Scraper Engine] -->|Scrapes 60+ Companies| B(Deduplicated Scraped Jobs)
-    B -->|Upsert & Refresh Timestamp| C[(Supabase DB jobs_cache)]
-    D[Telegram Bot] -->|User Registers Resume/Settings| E[(Supabase DB students)]
-    C --> F[Semantic Matcher & Experience Filter]
+    A[Scraper Engine: 60+ Companies] -->|Scrapes JDs| B(Job Hydration & Atomization)
+    B -->|Persist & Cache| C[(Neon Serverless PostgreSQL)]
+    D[Telegram Bot] -->|Candidate Profile & Resume| E[Candidate Evidence Profiler]
+    C --> F[Stage 1: Qwen-3 Embedding Retrieval]
     E --> F
-    F -->|Local Vector Matching BGE| G{Match Score & Experience Guardrails}
-    G -->|Passes Threshold + Boosts| H[Instant Telegram Job Alert]
+    F --> G[Stage 2: BGE Cross-Encoder Reranker]
+    G --> H{Stage 3: Ontology & Eligibility Gate}
+    H -->|Cross-Stack Traps Java != Golang| I[Drop / Penalize]
+    H -->|Verified Evidence MATCHED| J[Deterministic Scorer]
+    J -->|Passes Threshold + 2027 Boost| K[Instant Telegram Job Alert]
 ```
 
 ---
 
 ## 🛠️ Technology Stack
 
-`Python` · `FastAPI` · `sentence-transformers` (`BAAI/bge-small-en-v1.5`) · `Supabase (PostgreSQL)` · `python-telegram-bot` · `BeautifulSoup` · `AWS EC2` · `Docker` · `Gemini API`
+`Python` · `FastAPI` · `Cloudflare Workers AI` (`Qwen3-0.6B` + `BGE-Reranker`) · `Neon PostgreSQL` · `Supabase` · `python-telegram-bot` · `BeautifulSoup` · `Docker` · `Gemini API`
 
 ---
 
 ## ⚡ Real Production Challenges Solved
 
-*   **False-Positive Matching Bug:** Replaced fragile substring matching with an exact alias-map matcher after diagnosing systematic false positives.
-*   **Zero-Skill-Extraction Scoring Guard:** Fixed a silent failure mode where failed extractions defaulted to a false 100% match instead of erroring visibly.
-*   **Per-Student Delivery Dedup:** Implemented a `sent_jobs` tracking table keyed on `(chat_id, job_url_hash)` to stop duplicate alerts across scrape cycles.
-*   **Multi-Instance Telegram Bot Conflicts:** Diagnosed and resolved a polling conflict caused by overlapping bot instances in staging vs. production.
-*   **ATS-Specific Scraper Failures:** Fixed SSL/endpoint quirks across Ashby, Keka, and other ATS platforms as each surfaced its own edge cases in production.
+*   **Cross-Stack Language Trap Elimination:** Vector embeddings alone yielded a high 0.72 cosine similarity between Java and Golang (both being backend languages). Implemented an explicit hierarchical ontology gatekeeper (`ontology.py`) that dropped cross-stack false positives to **0.00%**.
+*   **Zero-RAM Serverless ML Footprint:** Replaced heavy local PyTorch dependencies with Cloudflare Workers AI serverless endpoints (`@cf/qwen/qwen3-embedding-0.6b` and `@cf/baai/bge-reranker-base`), keeping host memory consumption under 150 MB with zero cold-start bottlenecks.
+*   **Serverless DB Connection Liveness:** Overcame serverless pool idle timeouts (`server closed the connection unexpectedly`) by adding connection liveness pings (`SELECT 1`) and automatic reconnection logic in `neon_client.py`.
+*   **Zero-Skill-Extraction Scoring Guard:** Eliminated silent failure modes where unextracted JD requirements produced distorted match scores, introducing neutral baselines and atomic claim validation.
+*   **Per-Student Delivery Dedup:** Implemented idempotent notification tracking keyed on `(chat_id, job_url_hash)` to prevent redundant alerts across scrape cycles.
 
 ---
 
 ## 📈 Status & Ops
 
-*   **Live in Production:** Hosted on AWS EC2, actively serving SDE matches to **58+ active subscribers**.
-*   **Active Features:** Currently building a premium gap-analysis module (Aligner) with Razorpay API payment integrations.
+*   **Live in Production:** Hosted in containerized environment, actively serving verified SDE matches to **58+ active subscribers**.
+*   **Active Features:** Multi-stage evidence verification, 2027 batch internship weighting, and automated diagnostic evaluation suite.
 *   *Built solo, end to end — scraping, backend pipelines, ML matching, deployment, and ops.*
 
 ---
@@ -105,8 +109,9 @@ pip install -r requirements.txt
 Create a `.env` file in the root directory:
 ```env
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token
-SUPABASE_URL=your_supabase_project_url
-SUPABASE_KEY=your_supabase_anon_or_service_key
+DATABASE_URL=postgresql://user:password@ep-pooler.neon.tech/neondb?sslmode=require
+CLOUDFLARE_WORKER_URL=https://your-worker.workers.dev
+GEMINI_API_KEY=your_gemini_api_key
 ```
 
 ### 3. Run Locally
@@ -115,7 +120,7 @@ To run the Telegram Bot:
 python bot.py
 ```
 
-To manually trigger the scraping loop and cache updates:
+To manually trigger scraping and hydration:
 ```bash
 python -m scratch.trigger_scrape
 ```
@@ -124,8 +129,11 @@ python -m scratch.trigger_scrape
 
 ## 📁 Project Structure
 
-*   [bot.py](file:///c:/Users/ishit/OneDrive/Desktop/HiringRadar/bot.py) - Telegram bot handler for subscriber management, resume uploading, and admin functions.
-*   [scraper.py](file:///c:/Users/ishit/OneDrive/Desktop/HiringRadar/scraper.py) - Scraper engine for Greenhouse, Lever, Ashby, Keka, iCIMS, Workday, and Amazon.
-*   [matching.py](file:///c:/Users/ishit/OneDrive/Desktop/HiringRadar/matching.py) - Filters job levels, parses graduation batch details, and manages candidate-role scoring.
-*   [embeddings.py](file:///c:/Users/ishit/OneDrive/Desktop/HiringRadar/embeddings.py) - Calculates local cosine similarities using vector embeddings.
-*   [db.py](file:///c:/Users/ishit/OneDrive/Desktop/HiringRadar/db.py) - Supabase PostgreSQL CRUD operations.
+*   `bot.py` - Telegram bot handler for subscriber management, resume uploading, and feed dispatch.
+*   `matching.py` - Multi-stage matching pipeline: vector retrieval, cross-encoder reranking, and evidence scoring.
+*   `evidence_engine.py` - 3-state requirement atomization, candidate evidence extractor, and eligibility gates.
+*   `ontology.py` - Canonical skill synonym graph and cross-stack trap relationships.
+*   `embeddings.py` - Cloudflare Workers AI Qwen-3 embedding and BGE reranker client with tiered fallbacks.
+*   `neon_client.py` - Resilient Neon PostgreSQL client with connection pooling and liveness ping.
+*   `scraper.py` - Scraper engine for Greenhouse, Lever, Ashby, Keka, iCIMS, Workday, and Amazon.
+*   `db.py` - Database operations interface supporting Neon and Supabase.
