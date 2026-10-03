@@ -22,8 +22,8 @@ def _get_client():
             print(f"Gemini client init failed: {e}")
     return _gemini_client
 
-FAST_MODEL = "gemini-3.5-flash"
-SMART_MODEL = "gemini-3.5-flash"
+FAST_MODEL = "gemini-2.5-flash"
+SMART_MODEL = "gemini-2.5-flash"
 
 def execute_gemini_with_retry(prompt: str, model_name: str = FAST_MODEL, max_retries: int = 5) -> str:
     """Executes a Gemini generation call with exponential back-off retries to handle 429/503 errors."""
@@ -35,7 +35,7 @@ def execute_gemini_with_retry(prompt: str, model_name: str = FAST_MODEL, max_ret
     for attempt in range(max_retries):
         try:
             response = client.models.generate_content(
-                model=model_name,
+                model=model_name if attempt == 0 else "gemini-2.5-flash-lite",
                 contents=prompt,
             )
             text = (response.text or "").strip()
@@ -261,10 +261,14 @@ JSON output format:
             "resume_hook": "Developed a full-stack platform optimizing database query times and enabling containerized deployment."
         }
 
-def compute_skills_match(required_skills: list | set, matched_skills: list | set) -> float:
-    """Computes skills match percentage, returning 0.0 if required_skills is empty."""
+def compute_skills_match(required_skills: list | set, matched_skills: list | set, fallback_skills: list | set = None) -> float:
+    """Computes skills match percentage, never penalizing missing extraction as zero."""
     if not required_skills:
-        return 0.0
+        if matched_skills:
+            return min(1.0, 0.75 + 0.05 * len(matched_skills))
+        if fallback_skills:
+            return min(1.0, 0.65 + 0.05 * len(fallback_skills))
+        return 0.80  # Neutral baseline for entry-level roles without strict skill lists
     return len(matched_skills) / len(required_skills)
 
 
@@ -307,6 +311,16 @@ def compute_gap_analysis(resume_data: dict, jd_data: dict) -> dict:
 
     matched_required = fuzzy_match(required, resume_skills)
     matched_preferred = fuzzy_match(preferred, resume_skills)
+
+    # If required skills list is empty, scan description for candidate skills (prevent false zero)
+    if not required:
+        desc_lower = (jd_data.get("description") or "").lower()
+        title_lower = (jd_data.get("job_title") or "").lower()
+        haystack = f"{title_lower} {desc_lower}"
+        inferred = {s for s in resume_skills if s and len(s) > 1 and f" {s} " in f" {haystack} "}
+        if inferred:
+            matched_required = inferred
+
     missing_required = required - matched_required
 
     # Signal 1: Required skills match (0–1.0)
@@ -575,3 +589,4 @@ Write exactly 2 sentences of recruiter-grade advice:
         report += "\n\n_(Note: Local fallback matching used; Gemini was offline/rate-limited)_"
         
     return report
+

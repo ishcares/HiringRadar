@@ -1898,9 +1898,9 @@ if __name__ == "__main__":
     print("[startup] Loading local embedding model (BAAI/bge-small-en-v1.5)...")
     test_result = get_embeddings_from_hf(["health check"])
     if test_result:
-        print("[startup] ✅ Local embeddings online — semantic matching active.")
+        print("[startup] [OK] Embeddings online - semantic matching active.")
     else:
-        print("[startup] ⚠️  Local embedding model failed to initialise — running in keyword-only fallback mode. Check sentence-transformers install.")
+        print("[startup] [WARN] Embeddings running in fallback mode.")
 
     app = create_app(BOT_TOKEN)
 
@@ -1908,7 +1908,7 @@ if __name__ == "__main__":
     app.add_handler(CommandHandler("ping", ping))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown_message))
 
-    print("🚀 HiringRadar backend engine online and scanning...")
+    print("[startup] HiringRadar backend engine online and scanning...")
 
     # Python 3.13/3.14 event loop policy fix for daemon runtimes
     try:

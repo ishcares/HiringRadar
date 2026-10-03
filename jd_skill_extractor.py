@@ -125,7 +125,7 @@ def extract_skills_from_jd(title: str, company: str, description: str) -> dict:
     for attempt in range(max_retries):
         try:
             response = client.models.generate_content(
-                model="gemini-3.5-flash",
+                model="gemini-2.5-flash",
                 contents=prompt,
             )
             text = (response.text or "").strip()
@@ -296,3 +296,4 @@ if __name__ == "__main__":
     print(f"Running JD skill extraction for up to {batch} jobs...")
     count = asyncio.run(run_extraction_batch(batch))
     print(f"Done. {count} jobs updated.")
+

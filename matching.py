@@ -3,7 +3,8 @@ import os
 import re
 from datetime import datetime
 
-from embeddings import calculate_cosine_similarity, get_embeddings_from_hf
+import math
+from embeddings import calculate_cosine_similarity, get_embeddings_from_hf, rerank_contexts
 
 logger = logging.getLogger(__name__)
 
@@ -530,13 +531,36 @@ def _build_profile_text(student: dict) -> str:
     role_desc = " and ".join(role_descriptions.get(r, r) for r in roles) or "software engineering"
     skills_str = ", ".join(skills) if skills else "programming and software development"
 
+    role_names = ", ".join(r.replace("_", " ").title() for r in roles) if roles else "Software Engineer"
     return (
-        f"I am a {exp_level} looking for {position_type} positions. "
-        f"My areas of interest include {role_desc}. "
-        f"I am proficient in {skills_str}. "
-        f"I am seeking roles in software engineering, technology, and product development "
-        f"at startups and technology companies."
+        f"ROLE: {role_names}\n"
+        f"SENIORITY: {position_type.title()} ({exp_level})\n"
+        f"TECHNICAL SKILLS: {skills_str}\n"
+        f"CORE FOCUS: {role_desc}"
     )
+
+def _build_job_text(job: dict) -> str:
+    """Builds a structured key-value representation of a job description for clean embedding."""
+    title = job.get("title", "")
+    company = job.get("company", "")
+    location = job.get("location", "")
+    req_skills = ", ".join(job.get("required_skills") or [])
+    pref_skills = ", ".join(job.get("preferred_skills") or [])
+    min_exp = job.get("min_years_experience")
+    exp_str = f"{min_exp}+ years" if min_exp else "Entry-Level / Fresher"
+    desc_snippet = (job.get("description") or "")[:400].replace("\n", " ").strip()
+    
+    parts = [f"ROLE: {title} at {company}"]
+    if location:
+        parts.append(f"LOCATION: {location}")
+    parts.append(f"SENIORITY: {exp_str}")
+    if req_skills:
+        parts.append(f"REQUIRED SKILLS: {req_skills}")
+    if pref_skills:
+        parts.append(f"PREFERRED SKILLS: {pref_skills}")
+    if desc_snippet:
+        parts.append(f"SUMMARY: {desc_snippet}")
+    return "\n".join(parts)
 
 
 def _filter_fresher_jobs(jobs: list, grad_year: int, current_year: int, student_years: int | None = None) -> list:
@@ -969,7 +993,7 @@ def _score_jobs(jobs: list, student: dict, roles: list, embed_fn) -> tuple[list[
     jd_texts: list[str] = []
     jd_cache_keys: list[tuple] = []
     for j in jobs:
-        desc = (j.get("description") or "")[:_JD_CHARS].strip()
+        desc = _build_job_text(j)
         key = ("jd", j["title"], j.get("company", ""))
         jd_texts.append(desc)
         jd_cache_keys.append(key)
@@ -1163,7 +1187,7 @@ def match_jobs_for_student(
                 fresher_filtered.append(j)       # always: internship roles
             elif is_early_career(j):
                 fresher_filtered.append(j)       # always: early career / new grad programs
-            elif explicit_job_type == "fulltime":
+            elif explicit_job_type in ("fulltime", "both"):
                 fresher_filtered.append(j)       # user explicitly wants full-time
         remaining_jobs = fresher_filtered
     else:
@@ -1220,71 +1244,96 @@ def match_jobs_for_student(
     # Apply a 10% score boost to explicitly targeted internships and early career roles
     # to prioritize them over generic full-time roles for freshers.
     boosted_ranked = []
+    is_pre_final_year = grad_year > current_year
     for job, score in zip(jobs, scores):
         final_score = score
-        if is_internship(job) or is_early_career(job):
-            final_score = min(1.0, score + 0.10)
+        if is_pre_final_year:
+            # Student is graduating in 2027+ -> Internships are top priority
+            if is_internship(job):
+                final_score = min(1.0, score + 0.30)
+            elif not is_early_career(job):
+                final_score = max(0.05, score - 0.25)
+        else:
+            if is_internship(job) or is_early_career(job):
+                final_score = min(1.0, score + 0.10)
         boosted_ranked.append((job, final_score))
 
     ranked = sorted(boosted_ranked, key=lambda x: x[1], reverse=True)
-    results = [(job, score) for job, score in ranked if score >= threshold][:top_n]
+    candidates = [(job, score) for job, score in ranked if score >= threshold][:max(top_n * 2, 15)]
+
+    # Stage 2: Cross-Encoder Reranker (Cloudflare Workers AI @cf/baai/bge-reranker-base)
+    if candidates and len(candidates) > 1:
+        try:
+            profile_query = _build_profile_text(student)
+            contexts = [_build_job_text(job) for job, _ in candidates]
+            rerank_scores = rerank_contexts(profile_query, contexts)
+            if rerank_scores and any(s != 0.0 for s in rerank_scores):
+                reranked = []
+                for (job, s1), s2 in zip(candidates, rerank_scores):
+                    norm_s2 = 1.0 / (1.0 + math.exp(-s2)) if abs(s2) > 1.0 else max(0.0, min(1.0, s2))
+                    combined = round(0.40 * s1 + 0.60 * norm_s2, 4)
+                    reranked.append((job, combined))
+                candidates = sorted(reranked, key=lambda x: x[1], reverse=True)
+        except Exception as e:
+            logger.warning('Stage 2 reranking failed, keeping Stage 1 ranking: %s', e)
+
+    # Stage 3: Multi-Stage Evidence Engine Verification (Deterministic Gatekeeper)
+    try:
+        from evidence_engine import extract_candidate_evidence, atomize_job_requirements, evaluate_candidate_against_job
+        cand = extract_candidate_evidence(student)
+        verified_candidates = []
+        for job, s in candidates:
+            spec = atomize_job_requirements(job)
+            eval_res = evaluate_candidate_against_job(cand, spec)
+            # Hard drop on eligibility failure (e.g. 3+ yrs exp or senior for fresher)
+            if eval_res.get("eligibility_status") == "FAIL":
+                logger.info("Dropping ineligible role: %s @ %s (%s)", job.get("title"), job.get("company"), eval_res.get("eligibility_notes"))
+                continue
+            evidence_score = eval_res.get("final_score", 50) / 100.0
+            blended = round(0.40 * s + 0.60 * evidence_score, 4)
+            verified_candidates.append((job, blended))
+        if verified_candidates:
+            candidates = sorted(verified_candidates, key=lambda x: x[1], reverse=True)
+    except Exception as e:
+        logger.warning("Stage 3 evidence verification fallback: %s", e)
+
+    results = [(job, score) for job, score in candidates if score >= threshold][:top_n]
     return [(job, _rescale_for_display(score, used_fallback)) for job, score in results]
 
 
 
 def build_match_reason(job: dict, student: dict) -> str:
     """
-    Build a short human-readable explanation of why a job matched.
-
-    Priority order:
-    1. Matched structured required_skills[] from Gemini extraction (most accurate)
-    2. Matched skills found in job description text (fallback)
-    3. Role keyword match
-    4. Experience level fit
+    Evidence-backed match reason generated from the Multi-Stage Evidence Engine.
+    Guarantees no false positive 'iam' skill matches or incorrect 'Fresher-friendly' claims.
     """
-    reasons = []
-    student_skills = student.get("skills") or []
-    student_norm = {_norm_skill(s) for s in student_skills}
+    try:
+        from evidence_engine import extract_candidate_evidence, atomize_job_requirements, evaluate_candidate_against_job
+        cand = extract_candidate_evidence(student)
+        spec = atomize_job_requirements(job)
+        eval_res = evaluate_candidate_against_job(cand, spec)
 
-    # ── Priority 1: Match against structured Gemini-extracted required skills ──
-    job_required = job.get("required_skills") or []
-    if job_required:
-        matched_structured = [
-            s for s in job_required
-            if _norm_skill(s) in student_norm
-        ]
-        if matched_structured:
-            skill_names = ", ".join(matched_structured[:3])
-            reasons.append(f"You have {len(matched_structured)}/{len(job_required)} required skills ({skill_names}...)" if len(job_required) > 3 else f"Skills match: {skill_names}")
+        parts = []
+        matched = [r['original'] for r in eval_res.get('matched_requirements', [])][:3]
+        if matched:
+            parts.append(f"Verified skills: {', '.join(matched)}")
 
-    # ── Priority 2: Fallback — match against raw JD text ──────────────────────
-    if not reasons:
-        desc = (job.get("description") or "").lower()
-        title_lower = job["title"].lower()
-        haystack = title_lower + " " + desc
-        matched_text = []
-        for s in student_skills:
-            s_clean = s.lower().strip()
-            if re.search(r"\b" + re.escape(s_clean) + r"\b", haystack):
-                matched_text.append(s)
-        if matched_text:
-            reasons.append(f"Matches your {', '.join(matched_text[:2])} skills")
+        if eval_res.get('shared_domains'):
+            parts.append(f"{eval_res['shared_domains'][0].replace('_', ' ').title()}")
 
-    # ── Priority 3: Role keyword match ────────────────────────────────────────
-    title_lower = job["title"].lower()
-    preferred_roles = student.get("preferred_roles") or []
-    for role in preferred_roles:
-        keywords = keyword_map.get(role, [])
-        if any(k in title_lower for k in keywords):
-            reasons.append(f"{role.capitalize()} role")
-            break
+        status = eval_res.get('eligibility_status')
+        if status == 'PASS':
+            notes = [n for n in eval_res.get('eligibility_notes', []) if any(k in n.lower() for k in ['intern', 'graduat', 'fresher'])]
+            if notes:
+                parts.append(notes[0].split('(')[0].strip())
+            else:
+                parts.append('Fresher-friendly')
+        elif status == 'CAUTION':
+            parts.append('Review experience')
+        elif status == 'FAIL':
+            parts.append('⚠️ Seniority mismatch')
 
-    # ── Priority 4: Experience level fit ─────────────────────────────────────
-    grad_year = student.get("graduation_year", datetime.now().year)
-    fit = get_graduation_tag(job["title"], grad_year)
-    if "Good" in fit:
-        reasons.append("Fresher-friendly")
-
-    if not reasons:
-        reasons.append("Matches your profile")
-    return " · ".join(reasons)
+        return ' · '.join(parts) if parts else 'Matches your profile'
+    except Exception as e:
+        logger.warning('Evidence reason generation fallback: %s', e)
+        return 'Matches your profile'

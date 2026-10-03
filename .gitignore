@@ -39,3 +39,11 @@ scripts/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Personal trackers & prep notes (private)
+job_tracker.xlsx
+docs/sde-company-prep.md
+
+
+# Cloudflare Worker
+.wrangler/

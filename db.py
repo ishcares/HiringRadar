@@ -35,10 +35,19 @@ _key: str = os.getenv("SUPABASE_KEY", "")
 if not _url or not _key:
     logger.warning("SUPABASE_URL or SUPABASE_KEY not set — DB calls will fail.")
 
-# Disable HTTP/2 to prevent HTTP/2 socket / Errno 11 connection pooling bugs
-httpx_client = httpx.Client(http2=False)
-options = SyncClientOptions(httpx_client=httpx_client)
-supabase: Client = create_client(_url, _key, options=options) if (_url and _key) else None  # type: ignore
+_database_url: str = os.getenv("DATABASE_URL", "")
+
+if _database_url and ("neon.tech" in _database_url or "postgresql://" in _database_url):
+    from neon_client import NeonPostgresClient
+    supabase = NeonPostgresClient(_database_url)
+    logger.info("Using Neon Serverless PostgreSQL backend.")
+elif _url and _key:
+    # Disable HTTP/2 to prevent HTTP/2 socket / Errno 11 connection pooling bugs
+    httpx_client = httpx.Client(http2=False)
+    options = SyncClientOptions(httpx_client=httpx_client)
+    supabase: Client = create_client(_url, _key, options=options)
+else:
+    supabase = None
 
 
 # ---------------------------------------------------------------------------
@@ -336,23 +345,22 @@ def get_cached_jobs(delay_hours: int = 0) -> list[dict]:
         
         filtered = []
         for j in jobs:
-            scraped_at_str = j.get("scraped_at")
-            if scraped_at_str:
+            scraped_at_val = j.get("scraped_at")
+            if scraped_at_val:
                 try:
-                    t_str = scraped_at_str.replace("Z", "+00:00")
-                    t_val = datetime.fromisoformat(t_str)
-                    
-                    # Job must be fresher than 36 hours
+                    if isinstance(scraped_at_val, str):
+                        t_str = scraped_at_val.replace("Z", "+00:00")
+                        t_val = datetime.fromisoformat(t_str)
+                    else:
+                        t_val = scraped_at_val
+                    if t_val.tzinfo is None:
+                        t_val = t_val.replace(tzinfo=timezone.utc)
                     if t_val < max_age_cutoff:
                         continue
-                        
-                    # For free tier, job must also be older than the delay cutoff
                     if delay_cutoff and t_val > delay_cutoff:
                         continue
-                        
                     filtered.append(j)
-                except ValueError:
-                    # If date parsing fails, default to include it
+                except Exception:
                     filtered.append(j)
             else:
                 filtered.append(j)
