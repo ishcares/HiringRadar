@@ -825,14 +825,10 @@ def get_all_jobs():
     for name, token in [
         # Core Indian tech / MNCs
         ("Razorpay",      "razorpaysoftwareprivatelimited"),
-        ("PhonePe",       "phonepe"),
         ("Groww",         "groww"),
-        ("Postman",       "postman"),
         ("Coinbase",      "coinbase"),
         ("Rubrik",        "rubrik"),
-        ("Tekion",        "tekion"),
         ("InMobi",        "inmobi"),
-        ("DeepMind",      "deepmind"),
         ("Glean",         "gleanwork"),
         ("Stripe",        "stripe"),
         ("Samsara",       "samsara"),
@@ -905,6 +901,7 @@ def get_all_jobs():
 
     # ── Ashby ─────────────────────────────────────────────────────────────────
     for name, company_id in [
+        ("Tekion",        "tekion"),
         ("Superhuman",    "superhuman"),
         ("PostHog",       "posthog"),
         ("Notion",        "notion"),
