@@ -316,9 +316,14 @@ def upsert_jobs_cache(jobs: list[dict]) -> int:
         for job in jobs
     ]
     try:
-        supabase.table("jobs_cache").upsert(rows, on_conflict="id").execute()
-        logger.info("upsert_jobs_cache: wrote %d jobs", len(rows))
-        return len(rows)
+        chunk_size = 50
+        written = 0
+        for i in range(0, len(rows), chunk_size):
+            chunk = rows[i:i + chunk_size]
+            supabase.table("jobs_cache").upsert(chunk, on_conflict="id").execute()
+            written += len(chunk)
+        logger.info("upsert_jobs_cache: wrote %d jobs", written)
+        return written
     except Exception as e:
         logger.error("upsert_jobs_cache failed: %s", e)
         return 0
@@ -338,7 +343,7 @@ def get_cached_jobs(delay_hours: int = 0) -> list[dict]:
         now = datetime.now(timezone.utc)
         
         # Enforce a hard 36-hour maximum age limit for ALL alerts to prevent sending stale jobs
-        max_age_cutoff = now - timedelta(hours=36)
+        max_age_cutoff = now - timedelta(days=7)
         
         # Enforce minimum delay cutoff if delay_hours is specified
         delay_cutoff = now - timedelta(hours=delay_hours) if delay_hours > 0 else None

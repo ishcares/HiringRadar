@@ -106,23 +106,32 @@ def get_system_health():
 
 
 def search_jobs(query: str):
-    """Searches live Neon database for matching job titles or companies."""
-    if not query or not query.strip():
-        query = "intern"
-
+    """Searches live Neon database for matching job titles, companies, or keywords."""
     try:
         from db import supabase
         if not supabase:
             return [["Database not connected", "", "", ""]]
 
-        q = query.strip()
-        res = (
-            supabase.table("jobs_cache")
-            .select("title", "company", "location", "url")
-            .ilike("title", f"%{q}%")
-            .limit(20)
-            .execute()
-        )
+        q = query.strip() if query else ""
+        if q:
+            res = (
+                supabase.table("jobs_cache")
+                .select("title", "company", "location", "url")
+                .or_(f"title.ilike.%{q}%,company.ilike.%{q}%")
+                .eq("is_active", True)
+                .order("scraped_at", desc=True)
+                .limit(30)
+                .execute()
+            )
+        else:
+            res = (
+                supabase.table("jobs_cache")
+                .select("title", "company", "location", "url")
+                .eq("is_active", True)
+                .order("scraped_at", desc=True)
+                .limit(30)
+                .execute()
+            )
 
         rows = []
         if res and res.data:
@@ -162,8 +171,8 @@ with gr.Blocks(title="HiringRadar Systems Console", theme=gr.themes.Base()) as d
     with gr.Row():
         search_input = gr.Textbox(
             label="Search by Role, Skill, or Keyword",
-            placeholder="e.g. Backend, Python, Intern, Java, SDE...",
-            value="Intern"
+            placeholder="e.g. Backend, Python, Intern, Java, SDE, Stripe...",
+            value=""
         )
         search_btn = gr.Button("Search Jobs", variant="primary")
 
