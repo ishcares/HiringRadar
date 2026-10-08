@@ -22,9 +22,7 @@ scraped_jobs.csv
 *.csv
 
 # Scratch / Diagnostic scripts
-scratch/*
-!scratch/trigger_scrape.py
-!scratch/github_tracker.py
+scratch/
 temp*/
 *.log
 migrations/
@@ -52,3 +50,5 @@ docs/sde-company-prep.md
 *.png
 *.jpg
 *.jpeg
+
+temp_resumes/
