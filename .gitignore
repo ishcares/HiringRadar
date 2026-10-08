@@ -47,3 +47,8 @@ docs/sde-company-prep.md
 
 # Cloudflare Worker
 .wrangler/
+
+# Binary images
+*.png
+*.jpg
+*.jpeg
