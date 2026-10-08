@@ -13,3 +13,5 @@ supabase
 google-generativeai
 python-dateutil
 pypdf
+
+gradio>=4.44.0
