@@ -1,0 +1,110 @@
+﻿{
+  "ishita_2027": {
+    "id": "ishita_2027",
+    "name": "Ishita",
+    "department": "cse",
+    "graduation_year": 2027,
+    "years_of_experience": 0,
+    "preferred_roles": ["backend", "software engineer"],
+    "preferred_locations": ["Bangalore", "Pune", "Remote"],
+    "job_type": "both",
+    "skills": [
+      "java", "python", "sql", "postgresql", "mysql", "bash",
+      "spring boot", "rest apis", "redis", "fastapi", "concurrency",
+      "multithreading", "data structures & algorithms", "object-oriented design",
+      "distributed systems", "aws", "docker", "git", "linux", "jwt",
+      "owasp api security", "jca", "ecdsa"
+    ],
+    "projects": [
+      {
+        "name": "BioLock",
+        "technologies": ["Java", "Redis", "AWS", "Spring Boot", "JCA", "ECDSA"],
+        "concepts": [
+          "transaction integrity", "authorization", "replay protection",
+          "concurrency", "distributed locking", "jwt security"
+        ],
+        "bullets": [
+          "Engineered biometric authorization service with sub-100ms response time using Java 17 and Spring Boot",
+          "Implemented Redis-based distributed locking to guarantee transaction integrity and replay protection",
+          "Enforced OWASP API security standards and ECDSA cryptographic signature verification"
+        ]
+      }
+    ]
+  },
+  "frontend_2026": {
+    "id": "frontend_2026",
+    "name": "Alex",
+    "department": "cse",
+    "graduation_year": 2026,
+    "years_of_experience": 0,
+    "preferred_roles": ["frontend", "web developer"],
+    "preferred_locations": ["Bangalore", "Hyderabad", "Remote"],
+    "job_type": "both",
+    "skills": [
+      "javascript", "typescript", "react", "next.js", "redux", "tailwind css",
+      "html", "css", "graphql", "webpack", "vite", "jest", "git", "figma"
+    ],
+    "projects": [
+      {
+        "name": "ShopWave",
+        "technologies": ["React", "Next.js", "TypeScript", "Tailwind CSS"],
+        "concepts": ["server-side rendering", "state management", "responsive design", "web performance"],
+        "bullets": [
+          "Built high-performance responsive storefront using Next.js 14 and Tailwind CSS",
+          "Optimized Core Web Vitals to achieve 98+ Google Lighthouse score"
+        ]
+      }
+    ]
+  },
+  "ml_ai_2026": {
+    "id": "ml_ai_2026",
+    "name": "Rohan",
+    "department": "ai_data_science",
+    "graduation_year": 2026,
+    "years_of_experience": 0,
+    "preferred_roles": ["machine learning engineer", "data scientist", "ai engineer"],
+    "preferred_locations": ["Bangalore", "Pune", "Remote"],
+    "job_type": "both",
+    "skills": [
+      "python", "pytorch", "tensorflow", "scikit-learn", "pandas", "numpy",
+      "hugging face", "sentence-transformers", "chroma", "pinecone", "docker", "git", "sql"
+    ],
+    "projects": [
+      {
+        "name": "MedRAG",
+        "technologies": ["Python", "PyTorch", "Hugging Face", "ChromaDB"],
+        "concepts": ["retrieval-augmented generation", "semantic search", "vector embeddings", "fine-tuning"],
+        "bullets": [
+          "Implemented hybrid retrieval RAG pipeline over medical corpus achieving 91% recall",
+          "Fine-tuned domain-specific embedding model on clinical note pairs"
+        ]
+      }
+    ]
+  },
+  "senior_golang_lead": {
+    "id": "senior_golang_lead",
+    "name": "Vikram",
+    "department": "cse",
+    "graduation_year": 2019,
+    "years_of_experience": 6,
+    "preferred_roles": ["senior software engineer", "lead engineer", "backend lead"],
+    "preferred_locations": ["Pune", "Bangalore", "Remote"],
+    "job_type": "full_time",
+    "skills": [
+      "golang", "kubernetes", "docker", "terraform", "microservices", "grpc",
+      "distributed systems", "kafka", "postgresql", "active directory", "pki",
+      "x.509", "saml", "oidc", "linux", "aws", "prometheus", "ci/cd"
+    ],
+    "projects": [
+      {
+        "name": "AuthMesh",
+        "technologies": ["Golang", "Kubernetes", "gRPC", "Active Directory", "PKI"],
+        "concepts": ["identity and access management", "zero-trust architecture", "pki infrastructure", "oauth/saml"],
+        "bullets": [
+          "Architected enterprise identity federation engine handling 50k req/sec in Golang",
+          "Implemented SAML 2.0 and OIDC identity provider bridges with Active Directory"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+version: "3.8"
+
+services:
+  hiringradar-bot:
+    build: .
+    container_name: hiringradar_bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+
