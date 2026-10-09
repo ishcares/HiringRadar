@@ -26,13 +26,9 @@ _last_restart = time.time()
 
 
 async def _async_bot_main():
-    from bot import create_app, BOT_TOKEN, ping, unknown_message
-    from telegram.ext import CommandHandler, MessageHandler, filters
+    from bot import create_app, BOT_TOKEN
 
     app_bot = create_app(BOT_TOKEN)
-    app_bot.add_handler(CommandHandler("ping", ping))
-    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown_message))
-
     await app_bot.initialize()
     await app_bot.updater.start_polling()
     await app_bot.start()
