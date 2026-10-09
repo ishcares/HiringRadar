@@ -27,14 +27,8 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Singleton Supabase client — import `supabase` from this module everywhere
+# Database Client (Neon Serverless PostgreSQL Backend)
 # ---------------------------------------------------------------------------
-_url: str = os.getenv("SUPABASE_URL", "")
-_key: str = os.getenv("SUPABASE_KEY", "")
-
-if not _url or not _key:
-    logger.warning("SUPABASE_URL or SUPABASE_KEY not set — DB calls will fail.")
-
 _database_url: str = os.getenv("DATABASE_URL", "")
 if _database_url:
     import re
@@ -42,22 +36,13 @@ if _database_url:
     _database_url = re.sub(r'&channel_binding=[^&]*', '', _database_url)
     _database_url = re.sub(r'\?channel_binding=[^&]*&?', '?', _database_url).rstrip('?')
 
-# Fallback guard: if old/dead Supabase pooler URL is configured in Space secrets, route to active Neon DB
+# Fallback guard: route to active Neon DB
 if not _database_url or "rsbwortqnjugtebovwll" in _database_url:
     _database_url = "postgresql://neondb_owner:npg_WQITSDeji4P2@ep-frosty-fire-b36jf0mg-pooler.c-4.ap-southeast-1.aws.neon.tech/neondb?sslmode=require"
 
-
-if _database_url and ("neon.tech" in _database_url or "postgresql://" in _database_url):
-    from neon_client import NeonPostgresClient
-    supabase = NeonPostgresClient(_database_url)
-    logger.info("Using Neon Serverless PostgreSQL backend.")
-elif _url and _key:
-    # Disable HTTP/2 to prevent HTTP/2 socket / Errno 11 connection pooling bugs
-    httpx_client = httpx.Client(http2=False)
-    options = SyncClientOptions(httpx_client=httpx_client)
-    supabase: Client = create_client(_url, _key, options=options)
-else:
-    supabase = None
+from neon_client import NeonPostgresClient
+supabase = NeonPostgresClient(_database_url)
+logger.info("Using Neon Serverless PostgreSQL backend.")
 
 
 # ---------------------------------------------------------------------------
