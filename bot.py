@@ -40,7 +40,7 @@ from resume_ingest import extract_resume_text_from_path
 from jd_skill_extractor import extract_jd_skills_job
 from ai_agent import evaluate_resume_for_job
 
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 import base64
 

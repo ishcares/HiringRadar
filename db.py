@@ -22,7 +22,7 @@ from supabase import create_client, Client
 from supabase.lib.client_options import SyncClientOptions
 import httpx
 
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 logger = logging.getLogger(__name__)
 

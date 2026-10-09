@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import re
 
 # Ensure environment variables are loaded
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 # Configure Gemini Client
 _gemini_client = None

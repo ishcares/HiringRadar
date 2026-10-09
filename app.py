@@ -14,7 +14,7 @@ import gradio as gr
 from dotenv import load_dotenv
 
 # Ensure local .env is loaded if running locally
-load_dotenv()
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("hiringradar-space")
