@@ -25,46 +25,38 @@ _bot_status = "INITIALIZING"
 _last_restart = time.time()
 
 
-def start_bot_daemon():
-    """Continuously runs and monitors python bot.py in a background subprocess."""
-    global _bot_process, _bot_status, _last_restart
-    base_dir = os.path.dirname(os.path.abspath(__file__))
+def run_telegram_bot():
+    """Runs the complete Telegram bot in a dedicated thread with its own asyncio event loop."""
+    global _bot_status, _last_restart
+    import asyncio
 
     while True:
-        logger.info("[SPACE] Spawning Telegram bot daemon (bot.py)...")
-        _bot_status = "RUNNING"
-        _last_restart = time.time()
-
         try:
-            _bot_process = subprocess.Popen(
-                [sys.executable, "-u", "bot.py"],
-                cwd=base_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            )
+            logger.info("[SPACE] Initializing Telegram bot daemon...")
+            _bot_status = "RUNNING"
+            _last_restart = time.time()
 
-            # Stream logs into Hugging Face console
-            for line in _bot_process.stdout:
-                line_str = line.strip()
-                if line_str:
-                    print(f"[BOT] {line_str}", flush=True)
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
 
-            _bot_process.wait()
-            rc = _bot_process.returncode
-            logger.warning(f"[SPACE] Bot process terminated with return code {rc}")
-            _bot_status = f"EXITED (code {rc})"
+            from bot import create_app, BOT_TOKEN, ping, unknown_message
+            from telegram.ext import CommandHandler, MessageHandler, filters
+
+            app_bot = create_app(BOT_TOKEN)
+            app_bot.add_handler(CommandHandler("ping", ping))
+            app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown_message))
+
+            logger.info(f"[SPACE] [OK] Telegram bot online and polling (token prefix: {BOT_TOKEN[:10]}...)")
+            app_bot.run_polling(close_loop=False, stop_signals=None)
+
         except Exception as e:
-            logger.error(f"[SPACE] Error running bot process: {e}")
+            logger.error(f"[SPACE] Telegram bot encountered error: {e}", exc_info=True)
             _bot_status = f"ERROR: {e}"
-
-        logger.info("[SPACE] Re-launching bot daemon in 5 seconds...")
-        time.sleep(5)
+            time.sleep(5)
 
 
-# Start the bot daemon immediately in a dedicated background thread
-bot_thread = threading.Thread(target=start_bot_daemon, daemon=True)
+# Start the Telegram bot daemon in a dedicated background thread
+bot_thread = threading.Thread(target=run_telegram_bot, daemon=True)
 bot_thread.start()
 
 
