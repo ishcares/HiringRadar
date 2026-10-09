@@ -21,10 +21,32 @@ class TableQuery:
         self.payload = None
         self.on_conflict = None
 
-    def select(self, columns="*", count=None):
+    def select(self, *columns, count=None):
         self.action = "SELECT"
-        self.columns = columns
+        if not columns:
+            self.columns = "*"
+        elif len(columns) == 1:
+            self.columns = columns[0]
+        else:
+            self.columns = ", ".join(columns)
         self.count_mode = count
+        return self
+
+    def or_(self, filter_expression):
+        parts = [p.strip() for p in filter_expression.split(",") if p.strip()]
+        sql_or_parts = []
+        for part in parts:
+            tokens = part.split(".", 2)
+            if len(tokens) == 3:
+                col, op, val = tokens
+                if op == "ilike":
+                    sql_or_parts.append(f"{col} ILIKE %s")
+                    self.params.append(val)
+                elif op == "eq":
+                    sql_or_parts.append(f"{col} = %s")
+                    self.params.append(val)
+        if sql_or_parts:
+            self.conditions.append(f"({' OR '.join(sql_or_parts)})")
         return self
 
     def insert(self, data):

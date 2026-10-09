@@ -116,7 +116,7 @@ def search_jobs(query: str):
         if q:
             res = (
                 supabase.table("jobs_cache")
-                .select("title", "company", "location", "url")
+                .select("title, company, location, url")
                 .or_(f"title.ilike.%{q}%,company.ilike.%{q}%")
                 .eq("is_active", True)
                 .order("scraped_at", desc=True)
@@ -126,7 +126,7 @@ def search_jobs(query: str):
         else:
             res = (
                 supabase.table("jobs_cache")
-                .select("title", "company", "location", "url")
+                .select("title, company, location, url")
                 .eq("is_active", True)
                 .order("scraped_at", desc=True)
                 .limit(30)
