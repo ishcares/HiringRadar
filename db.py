@@ -36,9 +36,15 @@ if not _url or not _key:
     logger.warning("SUPABASE_URL or SUPABASE_KEY not set — DB calls will fail.")
 
 _database_url: str = os.getenv("DATABASE_URL", "")
+if _database_url:
+    import re
+    _database_url = re.sub(r'[\r\n\t ]+', '', _database_url.strip().strip("'\""))
+    _database_url = re.sub(r'&channel_binding=[^&]*', '', _database_url)
+    _database_url = re.sub(r'\?channel_binding=[^&]*&?', '?', _database_url).rstrip('?')
+
 # Fallback guard: if old/dead Supabase pooler URL is configured in Space secrets, route to active Neon DB
 if not _database_url or "rsbwortqnjugtebovwll" in _database_url:
-    _database_url = "postgresql://neondb_owner:npg_WQITSDeji4P2@ep-frosty-fire-b36jf0mg-pooler.c-4.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+    _database_url = "postgresql://neondb_owner:npg_WQITSDeji4P2@ep-frosty-fire-b36jf0mg-pooler.c-4.ap-southeast-1.aws.neon.tech/neondb?sslmode=require"
 
 
 if _database_url and ("neon.tech" in _database_url or "postgresql://" in _database_url):

@@ -193,7 +193,11 @@ class TableQuery:
 class NeonPostgresClient:
     """Drop-in Supabase-compatible client for Neon PostgreSQL using psycopg2 with autocommit."""
     def __init__(self, database_url):
-        self.database_url = database_url
+        import re
+        clean_url = re.sub(r'[\r\n\t ]+', '', (database_url or '').strip().strip("'\""))
+        clean_url = re.sub(r'&channel_binding=[^&]*', '', clean_url)
+        clean_url = re.sub(r'\?channel_binding=[^&]*&?', '?', clean_url).rstrip('?')
+        self.database_url = clean_url
         self._conn = None
 
     def get_connection(self):
