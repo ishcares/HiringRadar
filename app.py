@@ -25,8 +25,26 @@ _bot_status = "INITIALIZING"
 _last_restart = time.time()
 
 
+async def _async_bot_main():
+    from bot import create_app, BOT_TOKEN, ping, unknown_message
+    from telegram.ext import CommandHandler, MessageHandler, filters
+
+    app_bot = create_app(BOT_TOKEN)
+    app_bot.add_handler(CommandHandler("ping", ping))
+    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown_message))
+
+    await app_bot.initialize()
+    await app_bot.updater.start_polling()
+    await app_bot.start()
+    logger.info(f"[SPACE] [OK] Telegram bot online and polling (token prefix: {BOT_TOKEN[:10]}...)")
+    
+    # Keep the async polling loop alive indefinitely
+    while True:
+        await asyncio.sleep(3600)
+
+
 def run_telegram_bot():
-    """Runs the complete Telegram bot in a dedicated thread with its own asyncio event loop."""
+    """Runs the complete Telegram bot in a dedicated thread with asyncio.run."""
     global _bot_status, _last_restart
     import asyncio
 
@@ -35,20 +53,7 @@ def run_telegram_bot():
             logger.info("[SPACE] Initializing Telegram bot daemon...")
             _bot_status = "RUNNING"
             _last_restart = time.time()
-
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-            from bot import create_app, BOT_TOKEN, ping, unknown_message
-            from telegram.ext import CommandHandler, MessageHandler, filters
-
-            app_bot = create_app(BOT_TOKEN)
-            app_bot.add_handler(CommandHandler("ping", ping))
-            app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown_message))
-
-            logger.info(f"[SPACE] [OK] Telegram bot online and polling (token prefix: {BOT_TOKEN[:10]}...)")
-            app_bot.run_polling(close_loop=False, stop_signals=None)
-
+            asyncio.run(_async_bot_main())
         except Exception as e:
             logger.error(f"[SPACE] Telegram bot encountered error: {e}", exc_info=True)
             _bot_status = f"ERROR: {e}"
