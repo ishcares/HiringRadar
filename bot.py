@@ -44,7 +44,7 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 import base64
 
-_PROD_FALLBACK_TOKEN = base64.b64decode("ODc1NDYxMzk0OTpBQUhJT0lScFBhUk1IS0ZLbkxRdFFLczBBMHg3V09HbzNHRQ==").decode()
+_PROD_FALLBACK_TOKEN = base64.b64decode("ODc1NDYxMzk0OTpBQUZPRV8yaUJmWjI3U1ZFR0dNNVpaMEFjd2I1RkRwMkcwSQ==").decode()
 _env_token = (os.getenv("BOT_TOKEN") or "").strip()
 
 # Guard: if BOT_TOKEN is empty or pointing to old dev bot (8992719205 - HiringRadardev_bot from July 7),
